@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PWA Canvas</title>
+    
+    <meta name='viewport' content='width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover' />
+    <meta charset="utf-8">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <meta http-equiv="Permissions-Policy" content="interest-cohort=()">
+
+    <link rel="stylesheet" type="text/css" href="./css/appstyles.css">
+    <link rel="manifest" href="./manifest.json">
+    
+    <script src='./scripts/engine.js'></script>
+    <script src='./scripts/asset-lib.js'></script>
+</head>
+<body>
+    <div id="splash">
+        This game is not available to play
+    </div>
+
+    <!-- <input type="text" id="join-room-input" name="name" required minlength="0" maxlength="4" size="10" /> -->
+    <!-- <button id="join-room-button">Join Room</button> -->
+    <!-- <button id="create-room-button">Create Room</button> -->
+
+    <div class="input-field-cont">
+        <div class="input-container">
+            <div class="input-entry-area">
+                <!-- <div class="input-outline-bg"></div> -->
+                <input type="text" id="answer-field-id" class="answer-field" name="name" required minlength="1" maxlength="99" size="10" placeholder="" autocomplete="off" onkeydown="window.checkEnter(this)"/>
+                <div class="label-line" id="answer-field-line-id">Type Here...</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="dpi-div"></div>
+    <canvas id='application'></canvas>
+    <script>
+        window.checkEnter = function(ele) {
+            if(event.key === 'Enter') {
+                app.fire('pc-input-submitted')
+            }
+        }
+        // create a PlayCanvas application
+        const canvas = document.getElementById('application');
+        canvas.style['-webkit-user-select'] = 'none';
+        const app = new pc.Application(canvas, {
+            elementInput: new pc.ElementInput(canvas),
+            mouse: new pc.Mouse(canvas),
+            touch: !!('ontouchstart' in window) ? new pc.TouchDevice(canvas) : null,
+            keyboard: new pc.Keyboard(window),
+        });
+
+        var device = pc.Application.getApplication().graphicsDevice;
+        device.maxPixelRatio = window.devicePixelRatio;
+
+        app.setCanvasFillMode(pc.FILLMODE_FILL_WINDOW);
+        app.setCanvasResolution(pc.RESOLUTION_AUTO);
+
+        // ensure canvas is resized when window changes size
+        window.addEventListener('resize', () => app.resizeCanvas());
+        
+        const assetListLoader = new pc.AssetListLoader(
+            Object.values(assets),
+            app.assets
+        );
+        assetListLoader.load(() => {
+            app.root.addComponent('script');
+            app.root.script.create("Main-Scene-Script");
+
+            app.start();
+
+            // document.getElementById('splash').style.display = 'none';
+        });
+
+        const camera = new pc.Entity('camera');
+        camera.addComponent('camera', {
+            orthoHeight: 10,
+            fov: 10,
+            projection: pc.PROJECTION_ORTHOGRAPHIC,
+            clearColor: new pc.Color(0.0, 0.0, 0.0) //0.1, 0.1, 0.01
+        });
+        app.root.addChild(camera);
+        camera.setPosition(0, 0, 10);
+
+        const screen = new pc.Entity();
+        screen.addComponent("screen", {
+            referenceResolution: new pc.Vec2(1280, 720), //1280, 720
+            scaleBlend: 0.0,
+            scaleMode: pc.SCALEMODE_NONE,
+            screenSpace: false,
+        });
+        app.root.addChild(screen);
+
+        //---
+        
+    </script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.1/firebase-app.js";
+        import { getDatabase, ref, set, get, onValue } from "https://www.gstatic.com/firebasejs/10.12.1/firebase-database.js";
+        const firebaseConfig = {
+            apiKey: "AIzaSyDzoeOGqVi2maVrATF1vIG_crr5e3bX03M",
+            authDomain: "spellinggame-419ed.firebaseapp.com",
+            databaseURL: "https://spellinggame-419ed-default-rtdb.europe-west1.firebasedatabase.app",
+            projectId: "spellinggame-419ed",
+            storageBucket: "spellinggame-419ed.appspot.com",
+            messagingSenderId: "251812579401",
+            appId: "1:251812579401:web:73b33f7ffebab3d5a8d798"
+        };
+        const w = window;
+        const fbApp = initializeApp(firebaseConfig);
+        const db = getDatabase(fbApp);
+        w.db = db;
+        w.dbRef = ref;
+        w.dbSet = set;
+        w.dbGet = get;
+        w.dbOnValue = onValue;
+
+        w.isHost = false;
+        
+        const urlParams = window.parent.getQueryParams();
+        if(urlParams != null){
+            for (const [key, value] of urlParams) {
+                if(value == 'host'){
+                    w.isHost = true;
+                    document.getElementById('splash').style.display = 'none';
+                    break;
+                }else if(value == 'client'){
+                    document.getElementById('splash').style.display = 'none';
+                    // Show naming screen
+                    break;
+                }
+            }
+        }
+        
+    </script>
+</body>
+</html>
