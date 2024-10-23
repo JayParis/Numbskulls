@@ -1,7 +1,5 @@
 var MainScene = pc.createScript('Main-Scene-Script');
 
-
-
 function createMachine(stateMachineDefinition) {
 	const machine = {
 		value: stateMachineDefinition.initialState,
@@ -38,8 +36,11 @@ const machine = createMachine({
 			onEnter() {  }, onExit() {  }, onUpdate(dt) {  }
 		},
 		transitions: {
-			init: {
+			initHost: {
 				target: 'homepage', action() {},
+			},
+            initClient: {
+				target: 'naming', action() {},
 			},
 		},
 	},
@@ -50,16 +51,16 @@ const machine = createMachine({
 			onUpdate(dt) { homepage_onUpdate(dt); }
 		},
 		transitions: {
-			switch: {
-				target: 'lobbyClient', action() {},
+			goToNaming: {
+				target: 'naming', action() {},
 			},
 		},
 	},
-	lobbyClient: {
+	naming: {
 		actions: {
-			onEnter() { lobbyClient_onEnter(); },
-			onExit() { lobbyClient_onExit(); },
-			onUpdate(dt) { lobbyClient_onUpdate(dt); }
+			onEnter() { naming_onEnter(); },
+			onExit() { naming_onExit(); },
+			onUpdate(dt) { naming_onUpdate(dt); }
 		},
 		transitions: {
 			switch: {
@@ -71,14 +72,33 @@ const machine = createMachine({
 
 var state = machine.value;
 
+function cRect(e){ return {x: e.x / canvas.getBoundingClientRect().width, y: 1.0-(e.y / canvas.getBoundingClientRect().height)} }; // FLIPS Y
 // STATE_METHODS_START
 
 // QR screen for host, black for client without query string
-function homepage_onEnter(){}
-function homepage_onUpdate(dt){}
-function homepage_onExit(){}
+function homepage_onEnter(){
+    setQRBackgroundVisibility(1);
+    setInputVisibility(0);
+    app.on('pc-home-click', (e) => {
 
-function naming_onEnter(){}
+        if(cRect(e).y > 0.8){ // Open dev menu
+            setDevMenuVisibility(document.getElementById('dev-menu-id').style.display == 'none' ? 1 : 0);
+        }
+        if(cRect(e).y < 0.2){ // Start game
+            state = machine.transition(state, 'goToNaming');
+        }
+    });
+}
+function homepage_onUpdate(dt){}
+function homepage_onExit(){
+    app.off('pc-home-click');
+}
+
+function naming_onEnter(){
+    setQRBackgroundVisibility(0);
+    setDevMenuVisibility(0);
+    setInputVisibility(1);
+}
 function naming_onUpdate(dt){}
 function naming_onExit(){}
 
@@ -107,6 +127,8 @@ function scores_onExit(){}
 
 
 const w = window;
+const root = document.querySelector(':root');
+var handleTouch;
 var myState = {
     playerID: 0
 };
@@ -114,6 +136,7 @@ var myState = {
 var uTime = 0;
 var ui_bottom, ui_top, ui_center;
 var backgroundPatternShaderDef, backgroundPatternShader, backgroundPatternPlane;
+var QRShaderDef, QRShader, QRPlane, CodePlane, titlePlane, qrSkull;
 var skullShaderDef, skullShader;
 const allText = [];
 const skulls = [];
@@ -149,13 +172,33 @@ var clientUCharList = ['@','!','?','*','%','$','#','>','<','+']
 function writeNewExchange(message, valuesAsString='x'){
     clientUCharRoll += 1;
     const textToWrite = clientUCharList[mod01(clientUCharRoll,10)] + String(message) + ':' + String(valuesAsString);
-    console.log(textToWrite);
+    if(w.isHost){
+        w.dbSet(w.dbRef(w.db, 'game_room/game_exchange'), textToWrite);
+    }else{
+        w.dbSet(w.dbRef(w.db, `game_room/players/player_${(myState.playerID+1).toString()}/exchange`), textToWrite);
+    }
 }
 
 var promptsObj;
 async function getPrompts(){ const response = await fetch('/assets/objects/prompts.json'); promptsObj = await response.json(); };
 function parsePromptText(unparsedText){
     return String(unparsedText).replaceAll('@','\n').replaceAll('^','"').replaceAll('*','\'')
+}
+function parseInputEvent(e){ return {x: handleTouch ? e.touches[0].clientX : e.x, y: handleTouch ? e.touches[0].clientY : e.y} };
+
+function setInputVisibility(displayState){ // 0 = Hidden, 1 = Text entry, 2 = Finished message
+    document.getElementById('input-entry-area-id').style.display = displayState == 0 ? 'none' : 'block'
+    document.getElementById('input-overlay-message-id').style.display = displayState == 2 ? 'block' : 'none'
+    root.style.setProperty('--border-colour', displayState == 2 ? '#353535' : '#ffffff');
+}
+function setQRBackgroundVisibility(displayState){
+    QRPlane.enabled = displayState == 1;
+    CodePlane.enabled = displayState == 1;
+    titlePlane.enabled = displayState == 1;
+    qrSkull.enabled = displayState == 1;
+}
+function setDevMenuVisibility(displayState){
+    document.getElementById('dev-menu-id').style.display = displayState == 0 ? 'none' : 'block';
 }
 
 MainScene.prototype.initialize = function() {
@@ -165,6 +208,8 @@ MainScene.prototype.initialize = function() {
     ui_bottom = new pc.Entity('UI-Bottom'); app.root.addChild(ui_bottom);
 
     MainScene.prototype.createBackground();
+    MainScene.prototype.createQR();
+    MainScene.prototype.createNamingScreen();
     MainScene.prototype.createSkulls();
 
     const centerTextElem = new pc.Entity('CenterTextElem');
@@ -195,38 +240,103 @@ MainScene.prototype.initialize = function() {
             resetInputFieldMessage();
         }
     });
-    inputFieldElem.addEventListener("submit", (event) => {
-        console.log('Submit!');
-    });
-    //state = machine.transition(state, 'init');
+    setTimeout(() => { // DELETE
+        
+        // Init state and database listeners
+        firstUserFocus();
 
+        
+    }, 1100);
+
+    handleTouch = (typeof window !== 'undefined') && ('ontouchstart' in window || ('maxTouchPoints' in navigator && navigator.maxTouchPoints > 0));
+    // handleTouch = false;
+    // handleTouch = canvas.height > canvas.width * 1.25 && canvas.width < 815;
+    
+    if(handleTouch){
+        window.addEventListener("touchstart", (event) => {
+            app.fire('pc-home-click',parseInputEvent(event));
+        });
+    }else{
+        window.addEventListener("mousedown", (event) => {
+            app.fire('pc-home-click',parseInputEvent(event));
+        });
+    }
+    
     window.addEventListener('keydown',(e) => {
         if(e.key == 'e'){ refreshSkullOffsets(); } // DELETE
-        if(e.key == 'f'){ writeNewExchange("WAITING","0,1,2,3,4"); } // DELETE
+        if(e.key == 'g'){ QRPlane.enabled = false; } // DELETE
+        if(e.key == 'r'){ resetGameRoom(true); } // DELETE
+        if(e.key == 'x'){ writeNewExchange("WAITING","0,1,2,3,4"); } // DELETE
+        // if(e.key == 'f'){ writeNewExchange("WAITING","0,1,2,3,4"); } // DELETE
+    });
+    if(w.isHost) resetGameRoom(); // DELETE?
+}
+function firstUserFocus(){
+    if(w.isHost){
+        for (let i = 1; i <= 8; i++) {
+            w.dbOnValue(w.dbRef(w.db, `game_room/players/player_${i.toString()}/exchange`), (snap) => {
+                receivedPlayerExchange(String(snap.val()),i-1);
+            });
+        }
+        
+    } else {
+        w.dbGet(w.dbRef(w.db, 'player_count')).then((snap) => {
+            let currentPlayerCount = parseInt(snap.val());
+            
+            myState.playerID = currentPlayerCount; // Dont sub one?
+            console.log(currentPlayerCount);
+            
+
+            const updates = {};
+            updates['player_count'] = w.dbIncrement(1);
+            w.dbUpdate(w.dbRef(w.db), updates);
+
+        });
+        w.dbOnValue(w.dbRef(w.db, 'game_room/game_exchange'), (snap) => { receivedGameStateExchange(String(snap.val())); });
+    }
+
+    w.dbGet(w.dbRef(w.db, 'game_room')).then((snap) => {
+        const dbObj = snap.val();
+        if(dbObj.block_all_traffic === true) return;
+
+        colourOffset = dbObj.colour_offset;
+        iconOffset = dbObj.icon_offset;
+        refreshSkullOffsets();
+
+        state = machine.transition(state, w.isHost ? 'initHost' : 'initClient');
     });
 }
+
 function resetInputFieldMessage(){
     inputFieldAnswerElem.innerText = "Type Here...";
 };
 
-function resetGameRoom(){
-    if(w.isHost === false) return;
+function resetGameRoom(bypass=false){
+    if(w.isHost === false && !bypass) return;
+    w.dbSet(w.dbRef(w.db, 'player_count'), 1);
     w.dbSet(w.dbRef(w.db, 'game_room'), {
         game_exchange: 'RESET',
         started: false,
+        block_all_traffic: false,
         icon_offset: 0,
         colour_offset: 0,
         players: {
-            player_1: { exchange: "EX", name: "Name", answer_1: "A1", answer_2: "A2", score: 0 },
-            player_2: { exchange: "EX", name: "Name", answer_1: "A1", answer_2: "A2", score: 0 },
-            player_3: { exchange: "EX", name: "Name", answer_1: "A1", answer_2: "A2", score: 0 },
-            player_4: { exchange: "EX", name: "Name", answer_1: "A1", answer_2: "A2", score: 0 },
-            player_5: { exchange: "EX", name: "Name", answer_1: "A1", answer_2: "A2", score: 0 },
-            player_6: { exchange: "EX", name: "Name", answer_1: "A1", answer_2: "A2", score: 0 },
-            player_7: { exchange: "EX", name: "Name", answer_1: "A1", answer_2: "A2", score: 0 },
-            player_8: { exchange: "EX", name: "Name", answer_1: "A1", answer_2: "A2", score: 0 }
+            player_1: { exchange: "NIL", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
+            player_2: { exchange: "NIL", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
+            player_3: { exchange: "NIL", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
+            player_4: { exchange: "NIL", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
+            player_5: { exchange: "NIL", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
+            player_6: { exchange: "NIL", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
+            player_7: { exchange: "NIL", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
+            player_8: { exchange: "NIL", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 }
         }
     });
+}
+function receivedGameStateExchange(dataString){
+    console.log('FROM GAME: ' + dataString);
+}
+function receivedPlayerExchange(dataString, playerIndex){
+    console.log(`FROM PLAYER ${playerIndex+1}: ` + dataString);
 }
 
 MainScene.prototype.createBackground = function(){
@@ -249,10 +359,85 @@ MainScene.prototype.createBackground = function(){
 
     backgroundPatternPlane.render.meshInstances[0].material = new pc.Material();
     backgroundPatternPlane.render.meshInstances[0].material.shader = backgroundPatternShader;
-
     
     app.root.addChild(backgroundPatternPlane);
-}
+};
+MainScene.prototype.createQR = function(){
+
+    QRShaderDef = {
+        attributes: {
+            vVertex: pc.SEMANTIC_POSITION,
+            vNormal: pc.SEMANTIC_NORMAL,
+            vTexCoord: pc.SEMANTIC_TEXCOORD0
+        },
+        vshader: assets.qrVS.resource,
+        fshader: assets.qrFS.resource
+    };
+    QRShader = new pc.Shader(device, QRShaderDef);
+
+    QRPlane = new pc.Entity('QR-Background');
+    QRPlane.addComponent('render', { type: 'plane' });
+    QRPlane.setLocalPosition(0,0,1);
+    QRPlane.setLocalEulerAngles(90,0,0);
+
+    QRPlane.render.meshInstances[0].material = new pc.Material();
+    QRPlane.render.meshInstances[0].material.shader = QRShader;
+    
+    app.root.addChild(QRPlane);
+
+    CodePlane = new pc.Entity('QR-Code');
+    CodePlane.addComponent('render', { type: 'plane' });
+    CodePlane.setLocalPosition(0,0,1.2);
+    CodePlane.setLocalEulerAngles(90,0,0);
+    CodePlane.render.meshInstances[0].material = new pc.BasicMaterial();
+    CodePlane.render.meshInstances[0].material.blendType = pc.BLEND_NORMAL;
+    CodePlane.render.meshInstances[0].material.colorMap = assets.qrTex.resource;
+    // CodePlane.render.meshInstances[0].material.color = new pc.Color(0,0,0,1);
+    CodePlane.setLocalScale(10,10,10);
+    
+    app.root.addChild(CodePlane);
+
+
+    revRainbowShaderDef = {
+        attributes: {
+            vVertex: pc.SEMANTIC_POSITION,
+            vNormal: pc.SEMANTIC_NORMAL,
+            vTexCoord: pc.SEMANTIC_TEXCOORD0
+        },
+        vshader: assets.reverseRainbowVS.resource,
+        fshader: assets.reverseRainbowFS.resource
+    };
+    revRainbowShader = new pc.Shader(device, revRainbowShaderDef);
+
+    titlePlane = new pc.Entity('Title');
+    titlePlane.addComponent('render', { type: 'plane' });
+    titlePlane.setLocalPosition(0,0,1.3);
+    titlePlane.setLocalEulerAngles(90,0,0);
+    titlePlane.setLocalScale(576.0 * 0.013, 1, 92.25 * 0.013);
+    titlePlane.render.meshInstances[0].material = new pc.Material();
+    titlePlane.render.meshInstances[0].material.shader = revRainbowShader;
+    titlePlane.render.meshInstances[0].material.blendType = pc.BLEND_NORMAL;
+    titlePlane.render.meshInstances[0].material.setParameter('uMainTex',assets.titleTex.resource);
+    // titlePlane.render.meshInstances[0].material.colorMap = assets.titleTex.resource;
+    // titlePlane.render.meshInstances[0].material.color = new pc.Color(0,0,0,0.5);
+
+    app.root.addChild(titlePlane);
+
+    qrSkull = new pc.Entity('QR-Skull');
+    qrSkull.addComponent('render', { type: 'plane' });
+    qrSkull.setLocalPosition(0,0,1.4);
+    qrSkull.setLocalEulerAngles(90,0,0);
+    qrSkull.setLocalScale(2,2,2);
+    qrSkull.render.meshInstances[0].material = new pc.Material();
+    qrSkull.render.meshInstances[0].material.shader = revRainbowShader;
+    qrSkull.render.meshInstances[0].material.blendType = pc.BLEND_NORMAL;
+    qrSkull.render.meshInstances[0].material.setParameter('uMainTex',assets.skullTex_3.resource);
+    // qrSkull.render.meshInstances[0].material.color = new pc.Color(0,0,0,0.5);
+    
+    app.root.addChild(qrSkull);
+};
+MainScene.prototype.createNamingScreen = function(){
+};
 MainScene.prototype.createSkulls = function(){
     skullShaderDef = {
         attributes: {
@@ -328,6 +513,7 @@ MainScene.prototype.newText = function(defaultText, parent, offset, scale, color
 MainScene.prototype.update = function(dt) {
     uTime += dt;
     if(backgroundPatternPlane != null) backgroundPatternPlane.render.meshInstances[0].material.setParameter('uTime', uTime);
+    if(QRPlane != null) QRPlane.render.meshInstances[0].material.setParameter('uTime', uTime);
 
     machine.update(state, dt);
 
@@ -383,6 +569,15 @@ MainScene.prototype.resizeMethod = function() {
     ui_bottom.setPosition(0,-(orthoHeight-pushdown),0);
 
     if(backgroundPatternPlane != null) backgroundPatternPlane.setLocalScale(orthoHeight * (dim[0] / dim[1]) * 2,1,orthoHeight * 2);
+    if(QRPlane != null) {
+        QRPlane.setLocalScale(orthoHeight * (dim[0] / dim[1]) * 2,1,orthoHeight * 2);
+        QRPlane.render.meshInstances[0].material.setParameter('uScreenResolution', [canvas.width,canvas.height]);
+        let codeScale = (dim[0] / dim[1]) * 16.5; // 13.5
+        CodePlane.setLocalScale(codeScale,codeScale,codeScale);
+        titlePlane.setLocalScale(codeScale, codeScale, codeScale * 0.16015625);
+        titlePlane.setLocalPosition(0,(codeScale / 2) + 0.6,1.3);
+        qrSkull.setLocalScale(codeScale * 0.25,codeScale * 0.25,codeScale * 0.25);
+    }
 
     const textScale = 1.0 * pc_dpi;
     // const textScale = 1.0;

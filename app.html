@@ -18,7 +18,11 @@
 </head>
 <body>
     <div id="splash">
-        This game is not available to play
+        
+    </div>
+
+    <div class="dev-menu-cont" id="dev-menu-id">
+        Dev options go here
     </div>
 
     <!-- <input type="text" id="join-room-input" name="name" required minlength="0" maxlength="4" size="10" /> -->
@@ -27,8 +31,10 @@
 
     <div class="input-field-cont">
         <div class="input-container">
-            <div class="input-entry-area">
-                <!-- <div class="input-outline-bg"></div> -->
+            <div class="input-entry-area" id="input-entry-area-id">
+                <div class="input-overlay-message" id="input-overlay-message-id">
+                    <div class="label-line-overlay">Waiting for other players...</div>
+                </div>
                 <input type="text" id="answer-field-id" class="answer-field" name="name" required minlength="1" maxlength="99" size="10" placeholder="" autocomplete="off" onkeydown="window.checkEnter(this)"/>
                 <div class="label-line" id="answer-field-line-id">Type Here...</div>
             </div>
@@ -73,6 +79,9 @@
             app.start();
 
             // document.getElementById('splash').style.display = 'none';
+            setTimeout(() => {
+                if(document.getElementById('splash').style.display !== 'none') document.getElementById('splash').innerHTML = 'This game is not available to play'
+            }, 3000);
         });
 
         const camera = new pc.Entity('camera');
@@ -99,7 +108,7 @@
     </script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.1/firebase-app.js";
-        import { getDatabase, ref, set, get, onValue } from "https://www.gstatic.com/firebasejs/10.12.1/firebase-database.js";
+        import { getDatabase, ref, set, get, onValue, increment, update } from "https://www.gstatic.com/firebasejs/10.12.1/firebase-database.js";
         const firebaseConfig = {
             apiKey: "AIzaSyDzoeOGqVi2maVrATF1vIG_crr5e3bX03M",
             authDomain: "spellinggame-419ed.firebaseapp.com",
@@ -117,6 +126,8 @@
         w.dbSet = set;
         w.dbGet = get;
         w.dbOnValue = onValue;
+        w.dbIncrement = increment;
+        w.dbUpdate = update;
 
         w.isHost = false;
         

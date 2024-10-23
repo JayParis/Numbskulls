@@ -1,3 +1,7 @@
+:root {
+    --border-colour: #353535;
+}
+
 @font-face {
     font-family: PPMori;
     src: url('/assets/fonts/PPMori-Regular.otf');
@@ -27,9 +31,10 @@ body {
     width: 100%;
     z-index: 910;
     background-color:#000000;
-    color: #5b5b5b;
+    color: #d0d0d0;
     display: grid;
     place-items: center;
+    pointer-events: none;
 }
 
 #application-canvas {
@@ -77,6 +82,7 @@ canvas:focus {
     flex-direction: column;
     justify-content: flex-end;
     /* background-color: red; */
+    /* pointer-events: none; */
 }
 
 .input-container {
@@ -93,7 +99,7 @@ canvas:focus {
     height: 60px;
     line-height: 60px;
     border-radius: 10px;
-    border: 2px solid #ffffff;
+    border: 2px solid var(--border-colour);
     transition: 0.1s ease;
     padding: 0 20px;
 }
@@ -141,4 +147,42 @@ input:valid + .label-line{
     z-index: 111;
     padding: 0 15px;
     outline: none;
+}
+
+.input-overlay-message {
+    background-color: #252525;
+    position: absolute;
+    /* width: calc(100% - 0px); */
+    width: 100%;
+    margin-left: -20px;
+    /* padding: 0 0px 0 20px; */
+    /* width: calc(100%); */
+    height: 60px;
+    border-radius: 6px;
+    /* margin: 0 20px 0 20px; */
+    z-index: 311;
+}
+.label-line-overlay{
+    position: absolute;
+    font-size: 1.46em;
+    color: #696969;
+    padding: 0px;
+    margin-left: 20px;
+    /* margin: 0 20px; */
+    background-color: transparent;
+    transition: 0.2s ease;
+    z-index: 211;
+    pointer-events: none;
+}
+.dev-menu-cont{
+    margin: 0;
+    padding: 0;
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(42, 0, 18, 0.613);
+    z-index: 700;
+    padding: 30px;
+    color: white;
+    display: none;
 }

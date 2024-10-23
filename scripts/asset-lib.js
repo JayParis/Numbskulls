@@ -6,6 +6,8 @@ const assets = {
     PPMoriSemiBold: new pc.Asset("PP-Mori-Semi-Bold-Edited", "font", { url: "./assets/fonts/PPMori-SemiBold-Edited.json", }),
     
     // Textures
+    titleTex: new pc.Asset("Numbskull-Title-Tex", "texture", { url: "./assets/textures/numbskulls-title.webp" }, { type: pc.TEXTURETYPE_RGBP, mipmaps: false } ),
+    qrTex: new pc.Asset("Numbskull-QR-Tex", "texture", { url: "./assets/textures/numbskulls-qr.webp" }, { type: pc.TEXTURETYPE_RGBP, mipmaps: false } ),
     skullTex_1: new pc.Asset("Skull-Tex-1", "texture", { url: "./assets/textures/skull-1.png" }, { type: pc.TEXTURETYPE_RGBP, mipmaps: false } ),
     skullTex_2: new pc.Asset("Skull-Tex-2", "texture", { url: "./assets/textures/skull-2.png" }, { type: pc.TEXTURETYPE_RGBP, mipmaps: false } ),
     skullTex_3: new pc.Asset("Skull-Tex-3", "texture", { url: "./assets/textures/skull-3.png" }, { type: pc.TEXTURETYPE_RGBP, mipmaps: false } ),
@@ -23,8 +25,12 @@ const assets = {
     // Shaders
     backgroundVS: new pc.Asset("Background-VS", "shader", { url: "./assets/shaders/background-vs.glsl", }),
     backgroundFS: new pc.Asset("Background-FS", "shader", { url: "./assets/shaders/background-fs.glsl", }),
+    qrVS: new pc.Asset("QR-VS", "shader", { url: "./assets/shaders/qr-vs.glsl", }),
+    qrFS: new pc.Asset("QR-FS", "shader", { url: "./assets/shaders/qr-fs.glsl", }),
     skullVS: new pc.Asset("Skull-VS", "shader", { url: "./assets/shaders/skull-vs.glsl", }),
     skullFS: new pc.Asset("Skull-FS", "shader", { url: "./assets/shaders/skull-fs.glsl", }),
+    reverseRainbowVS: new pc.Asset("Reverse-Rainbow-VS", "shader", { url: "./assets/shaders/reverse-rainbow-vs.glsl", }),
+    reverseRainbowFS: new pc.Asset("Reverse-Rainbow-FS", "shader", { url: "./assets/shaders/reverse-rainbow-fs.glsl", }),
     // heartVS: new pc.Asset("Heart-VS", "shader", { url: "./assets/shaders/heart-vs.glsl", }),
     // heartFS: new pc.Asset("Heart-FS", "shader", { url: "./assets/shaders/heart-fs.glsl", }),
     // heartOutlineVS: new pc.Asset("Heart-Outline-VS", "shader", { url: "./assets/shaders/heart-outline-vs.glsl", }),
