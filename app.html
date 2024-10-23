@@ -3,6 +3,7 @@
 <head>
     <title>PWA Canvas</title>
     
+    <meta name="theme-color" content="#000000"/>
     <meta name='viewport' content='width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover' />
     <meta charset="utf-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
@@ -36,7 +37,7 @@
                     <div class="label-line-overlay">Waiting for other players...</div>
                 </div>
                 <input type="text" id="answer-field-id" class="answer-field" name="name" required minlength="1" maxlength="99" size="10" placeholder="" autocomplete="off" onkeydown="window.checkEnter(this)"/>
-                <div class="label-line" id="answer-field-line-id">Type Here...</div>
+                <div class="label-line" id="answer-field-line-id">...</div>
             </div>
         </div>
     </div>
@@ -46,7 +47,8 @@
     <script>
         window.checkEnter = function(ele) {
             if(event.key === 'Enter') {
-                app.fire('pc-input-submitted')
+                if(myState.gameStateID == 0) app.fire('pc-name-submit');
+                document.getElementById('answer-field-id').blur();
             }
         }
         // create a PlayCanvas application

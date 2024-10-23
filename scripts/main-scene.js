@@ -1,4 +1,5 @@
 var MainScene = pc.createScript('Main-Scene-Script');
+var spinOffsets = [1.50748, 1.78961, 1.368377, 1.22982, 1.124635, 1.553598, 1.127538, 1.688590]
 
 function createMachine(stateMachineDefinition) {
 	const machine = {
@@ -63,6 +64,18 @@ const machine = createMachine({
 			onUpdate(dt) { naming_onUpdate(dt); }
 		},
 		transitions: {
+			goToLobby: {
+				target: 'lobby', action() {},
+			},
+		},
+	},
+    lobby: {
+		actions: {
+			onEnter() { lobby_onEnter(); },
+			onExit() { lobby_onExit(); },
+			onUpdate(dt) { lobby_onUpdate(dt); }
+		},
+		transitions: {
 			switch: {
 				target: 'homepage', action() {},
 			},
@@ -98,11 +111,40 @@ function naming_onEnter(){
     setQRBackgroundVisibility(0);
     setDevMenuVisibility(0);
     setInputVisibility(1);
+    resetInputFieldMessage();
+
+    for (let i = 0; i < 8; i++) {
+        const skull = skulls[i];
+        if(i != myState.playerID){
+            skull.setLocalPosition(-90,-90,-90);
+            continue;
+        }
+        skull.setPosition(ui_center.getPosition());
+        skull.setLocalScale(pc_dpi * 150,pc_dpi * 150,pc_dpi * 150);
+    }
+
+    app.on('pc-name-submit', (e) => {
+        state = machine.transition(state, 'goToLobby');
+
+        if(!w.isHost){
+            writeNewExchange('JOINED');
+        }
+    });
 }
 function naming_onUpdate(dt){}
-function naming_onExit(){}
+function naming_onExit(){
+    app.off('pc-name-submit');
+}
 
-function lobby_onEnter(){}
+function lobby_onEnter(){
+    setInputVisibility(2);
+    for (let i = 0; i < 8; i++) {
+        const skull = skulls[i];
+        let centerArray = centeredList(i,8,9.75,[0,-10,1]);
+        skull.setLocalPosition(centerArray[0],centerArray[1],centerArray[2]);
+        skull.setLocalScale(8,8,8);
+    }
+}
 function lobby_onUpdate(dt){}
 function lobby_onExit(){}
 
@@ -130,13 +172,14 @@ const w = window;
 const root = document.querySelector(':root');
 var handleTouch;
 var myState = {
-    playerID: 0
+    playerID: 0,
+    gameStateID: 0
 };
 
 var uTime = 0;
 var ui_bottom, ui_top, ui_center;
 var backgroundPatternShaderDef, backgroundPatternShader, backgroundPatternPlane;
-var QRShaderDef, QRShader, QRPlane, CodePlane, titlePlane, qrSkull;
+var QRShaderDef, QRShader, QRPlane, CodePlane, titlePlane, qrSkull, namingSkull;
 var skullShaderDef, skullShader;
 const allText = [];
 const skulls = [];
@@ -158,8 +201,8 @@ function getPlayerTextColour(index) { const rIndex = mod01(index + colourOffset,
 function refreshSkullOffsets(){
     const allSkullTextures = [assets.skullTex_1,assets.skullTex_2,assets.skullTex_3,assets.skullTex_4,assets.skullTex_5,assets.skullTex_6,assets.skullTex_7,assets.skullTex_8,];
 
-    colourOffset = Math.floor(Math.random() * 100); // DELETE
-    iconOffset = Math.floor(Math.random() * 100); // DELETE
+    // colourOffset = Math.floor(Math.random() * 100); // DELETE
+    // iconOffset = Math.floor(Math.random() * 100); // DELETE
     for (let i = 0; i < 8; i++){
         const skull = skulls[i];
         const rIndex = mod01(i + iconOffset,8);
@@ -187,6 +230,7 @@ function parsePromptText(unparsedText){
 function parseInputEvent(e){ return {x: handleTouch ? e.touches[0].clientX : e.x, y: handleTouch ? e.touches[0].clientY : e.y} };
 
 function setInputVisibility(displayState){ // 0 = Hidden, 1 = Text entry, 2 = Finished message
+    document.getElementById('answer-field-line-id').style.display = displayState == 2 ? 'none' : 'block'
     document.getElementById('input-entry-area-id').style.display = displayState == 0 ? 'none' : 'block'
     document.getElementById('input-overlay-message-id').style.display = displayState == 2 ? 'block' : 'none'
     root.style.setProperty('--border-colour', displayState == 2 ? '#353535' : '#ffffff');
@@ -200,6 +244,7 @@ function setQRBackgroundVisibility(displayState){
 function setDevMenuVisibility(displayState){
     document.getElementById('dev-menu-id').style.display = displayState == 0 ? 'none' : 'block';
 }
+
 
 MainScene.prototype.initialize = function() {
 
@@ -222,7 +267,7 @@ MainScene.prototype.initialize = function() {
         const promptMinFontSize = promptsObj[indexToGet].minFontSize;
         const promptMaxFontSize = promptsObj[indexToGet].maxFontSize;
         const promptLineHeight = promptsObj[indexToGet].lineHeight;
-        MainScene.prototype.newText(promptText,centerTextElem,[0,0.0,1],0.92,[1,1,1],0,[promptMinFontSize, promptMaxFontSize, promptLineHeight]);
+        // MainScene.prototype.newText(promptText,centerTextElem,[0,0.0,1],0.92,[1,1,1],0,[promptMinFontSize, promptMaxFontSize, promptLineHeight]);
         this.resizeMethod();
     });
 
@@ -283,6 +328,7 @@ function firstUserFocus(){
         w.dbGet(w.dbRef(w.db, 'player_count')).then((snap) => {
             let currentPlayerCount = parseInt(snap.val());
             
+            if(currentPlayerCount >= 8) return; // Too many players, do something to prevent them playing
             myState.playerID = currentPlayerCount; // Dont sub one?
             console.log(currentPlayerCount);
             
@@ -308,7 +354,7 @@ function firstUserFocus(){
 }
 
 function resetInputFieldMessage(){
-    inputFieldAnswerElem.innerText = "Type Here...";
+    inputFieldAnswerElem.innerText = myState.gameStateID == 0 ? "Name..." : "Answer Here...";
 };
 
 function resetGameRoom(bypass=false){
@@ -437,6 +483,25 @@ MainScene.prototype.createQR = function(){
     app.root.addChild(qrSkull);
 };
 MainScene.prototype.createNamingScreen = function(){
+
+    const namingEntity = new pc.Entity('Naming-Entity');
+    namingEntity.setLocalEulerAngles(90,0,0);
+    ui_center.addChild(namingEntity);
+    namingEntity.setLocalPosition(0,33,0);
+    const listOfNameGreetings = ['So, what should\n we call you?','A name, if you please...'];
+    const nameGreeting = listOfNameGreetings[Math.floor(Math.random() * listOfNameGreetings.length * 0.99999)];
+    MainScene.prototype.newText(nameGreeting,namingEntity,[0,0.0,1],0.92,[1,1,1],0);
+    this.resizeMethod();
+
+    // namingSkull = new pc.Entity('QR-Skull');
+    // namingSkull.addComponent('render', { type: 'plane' });
+    // namingSkull.setLocalPosition(0,0,1.4);
+    // namingSkull.setLocalEulerAngles(90,0,0);
+    // namingSkull.setLocalScale(2,2,2);
+    // namingSkull.render.meshInstances[0].material = new pc.Material();
+    // namingSkull.render.meshInstances[0].material.shader = skullShader;
+    // namingSkull.render.meshInstances[0].material.blendType = pc.BLEND_NORMAL;
+    // namingSkull.render.meshInstances[0].material.setParameter('uMainTex',assets.skullTex_3.resource);
 };
 MainScene.prototype.createSkulls = function(){
     skullShaderDef = {
@@ -509,9 +574,10 @@ MainScene.prototype.newText = function(defaultText, parent, offset, scale, color
     return textElem;
 }
 
-
+function resetUTime(){uTime = 0;}
 MainScene.prototype.update = function(dt) {
     uTime += dt;
+    if(uTime > 600) resetUTime();
     if(backgroundPatternPlane != null) backgroundPatternPlane.render.meshInstances[0].material.setParameter('uTime', uTime);
     if(QRPlane != null) QRPlane.render.meshInstances[0].material.setParameter('uTime', uTime);
 
@@ -529,6 +595,12 @@ MainScene.prototype.update = function(dt) {
         allText[i].textElement.setPosition(fPos);
         const rot = allText[i].worldSpaceTarget.getEulerAngles();
         allText[i].textElement.setEulerAngles(rot.x-90,rot.y,rot.z);
+    }
+
+    for (let i = 0; i < skulls.length; i++) {
+        const skull = skulls[i];
+        let rot = Math.sin(uTime * spinOffsets[i]) * 20;
+        skull.setLocalEulerAngles(90,0,rot);
     }
 }
 
