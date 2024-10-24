@@ -177,7 +177,7 @@ function lobby_onEnter(){
         if(!w.isHost) return;
         
         if(cRect(e).y < 0.2 && timeInState > 0.5){ // Start game
-            writeNewExchange('STARTING');
+            writeNewExchange('STARTING', getMatchupOrder(7,promptsObj.length));
             state = machine.transition(state, 'goToRound');
         }
     });
@@ -191,6 +191,7 @@ function lobby_onExit(){ app.off('check-lobby-size'); app.off('pc-lobby-click');
 
 var roundIntroTimer = 0.0, movedIntoAnswering = false;
 function newRound_onEnter(){
+    setRoundVisibility(1,myState.currentRound);
     roundIntroTimer = 0.0;
     movedIntoAnswering = false;
     setInputVisibility(0);
@@ -215,7 +216,8 @@ function newRound_onUpdate(dt){
 function newRound_onExit(){ app.off('move-into-answering'); }
 
 function answering_onEnter(){
-    fadePlaneAnim([0,1,0]);
+    setRoundVisibility(0,myState.currentRound);
+    fadePlaneAnim(lastRoundBGColour);
 }
 function answering_onUpdate(dt){}
 function answering_onExit(){}
@@ -239,6 +241,7 @@ var myState = {
     playerID: 0,
     gameStateID: 0,
     playersInGame: 0,
+    currentRound: 1,
     allPlayerNames: [
         'Jay',
         '^!*',
@@ -248,8 +251,10 @@ var myState = {
         '^!*',
         '^!*',
         '^!*',
-    ]
+    ],
+    matchups: []
 };
+var lastRoundBGColour = [0,0,0];
 function getExchangeKeyValue(fullString){
     const spl = String(fullString).substring(1).split(':');
     return {key: spl[0], value: spl[1]}
@@ -274,11 +279,26 @@ async function calcPlayersInGame(){
         });
     });
 }
+function parseMatchupString(orderString){
+    const retArray = [];
+    const splitString = orderString.split(',');
+
+    for (let i = 0; i < splitString.length / 3; i++) {
+        const group = [
+            splitString[i*3],
+            splitString[(i*3)+1],
+            splitString[(i*3)+2]
+        ];
+        retArray.push(group);
+    }
+    return retArray;
+}
 
 var uTime = 0;
 var ui_bottom, ui_top, ui_center;
 var backgroundPatternShaderDef, backgroundPatternShader, backgroundPatternPlane;
 var QRShaderDef, QRShader, QRPlane, CodePlane, titlePlane, qrSkull, namingEntity;
+var RoundShaderDef, RoundShader, RoundPlane, roundTitleEntity, roundTextElement;
 var fadeRect, fadePlaneAnim_t = 0.0, fadePlaneColour=[0,0,0];
 var skullShaderDef, skullShader;
 const allText = [];
@@ -358,18 +378,19 @@ MainScene.prototype.initialize = function() {
     MainScene.prototype.createNamingScreen();
     MainScene.prototype.createLobbyScreen();
     MainScene.prototype.createSkulls();
-    MainScene.prototype.createFadePlane();
+    MainScene.prototype.createRoundScreen();
+    MainScene.prototype.createFadePlane(); // Must be last
 
     const centerTextElem = new pc.Entity('CenterTextElem');
     centerTextElem.setLocalEulerAngles(90,0,0);
     ui_center.addChild(centerTextElem);
 
     getPrompts().then(() => {
-        const indexToGet = promptsObj.length-1;
-        const promptText = parsePromptText(promptsObj[indexToGet].text);
-        const promptMinFontSize = promptsObj[indexToGet].minFontSize;
-        const promptMaxFontSize = promptsObj[indexToGet].maxFontSize;
-        const promptLineHeight = promptsObj[indexToGet].lineHeight;
+        const indexToGet = promptsObj.prompts.length-1;
+        const promptText = parsePromptText(promptsObj.prompts[indexToGet].text);
+        const promptMinFontSize = promptsObj.prompts[indexToGet].minFontSize;
+        const promptMaxFontSize = promptsObj.prompts[indexToGet].maxFontSize;
+        const promptLineHeight = promptsObj.prompts[indexToGet].lineHeight;
         // MainScene.prototype.newText(promptText,centerTextElem,[0,0.0,1],0.92,[1,1,1],0,[promptMinFontSize, promptMaxFontSize, promptLineHeight]);
         this.resizeMethod();
     });
@@ -413,19 +434,14 @@ MainScene.prototype.initialize = function() {
     }
     
     window.addEventListener('keydown',(e) => {
+        return;
+        if(e.key == 'g'){ setRoundVisibility(1, myState.currentRound); myState.currentRound += 1; } // DELETE
         if(e.key == 'e'){
             const orderString = getMatchupOrder(7,promptsObj.length);
-
-            const baseArray = [];
-            
-
-            // const orderObj = JSON.parse(orderString);
-            // console.log(orderObj);
-            
-
+            const rArray = parseMatchupString(orderString);
+            console.log(rArray);
         } // DELETE
         return;
-        if(e.key == 'g'){ QRPlane.enabled = false; } // DELETE
         if(e.key == 'r'){ resetGameRoom(); } // DELETE
         if(e.key == 'x'){ writeNewExchange("WAITING","0,1,2,3,4"); } // DELETE
         if(e.key == 'f'){
@@ -501,7 +517,11 @@ function resetGameRoom(bypass=false){
 function receivedGameStateExchange(dataString){
     console.log('FROM GAME: ' + dataString);
     if(getExchangeKeyValue(dataString).key == 'WAITING') app.fire('check-lobby-size');
-    if(getExchangeKeyValue(dataString).key == 'STARTING') app.fire('move-into-round');
+    if(getExchangeKeyValue(dataString).key == 'STARTING'){
+        myState.matchups = parseMatchupString(getExchangeKeyValue(dataString).value);
+        console.log(myState.matchups);
+        app.fire('move-into-round');
+    }
     if(getExchangeKeyValue(dataString).key == 'ANSWERING') app.fire('move-into-answering');
 }
 function receivedPlayerExchange(dataString, playerIndex){
@@ -712,7 +732,7 @@ MainScene.prototype.createFadePlane = function(){
         opacity: 0.0,
         // texture: assets.testLogo.resource
     });
-    fadeRect.setPosition(0,0,5);
+    fadeRect.setPosition(0,0,8.5);
     fadeRect.setLocalScale(.1,.1,.1);
     screen.addChild(fadeRect);
 };
@@ -720,6 +740,64 @@ function fadePlaneAnim(colour=[0,0,0],start_t=1.0){
     fadePlaneColour = colour;
     fadeRect.element.color = new pc.Color(fadePlaneColour[0],fadePlaneColour[1],fadePlaneColour[2],1.0);
     fadePlaneAnim_t = start_t;
+}
+MainScene.prototype.createRoundScreen = function(){
+    RoundShaderDef = {
+        attributes: {
+            vVertex: pc.SEMANTIC_POSITION,
+            vNormal: pc.SEMANTIC_NORMAL,
+            vTexCoord: pc.SEMANTIC_TEXCOORD0
+        },
+        vshader: assets.roundVS.resource,
+        fshader: assets.roundFS.resource
+    };
+    RoundShader = new pc.Shader(device, RoundShaderDef);
+
+    RoundPlane = new pc.Entity('Round-Background');
+    RoundPlane.addComponent('render', { type: 'plane' });
+    RoundPlane.setLocalPosition(0,0,6);
+    RoundPlane.setLocalEulerAngles(90,0,0);
+
+    RoundPlane.render.meshInstances[0].material = new pc.Material();
+    RoundPlane.render.meshInstances[0].material.shader = RoundShader;
+    RoundPlane.render.meshInstances[0].material.setParameter('uRoundColourA',[0,0,0]);
+    RoundPlane.render.meshInstances[0].material.setParameter('uRoundColourB',[1,1,1]);
+    RoundPlane.enabled = false;
+    
+    app.root.addChild(RoundPlane);
+
+    roundTitleEntity = new pc.Entity('Naming-Entity');
+    roundTitleEntity.setLocalEulerAngles(90,0,0);
+    // ui_center.addChild(roundTitleEntity);
+    app.root.addChild(roundTitleEntity);
+    roundTitleEntity.setLocalPosition(1000,-0.2,7); // 0,-0.2,7
+    MainScene.prototype.newText("Round",roundTitleEntity,[0,0,0],0.92,[1,1,1],0,[15.2,15.2,14]);
+};
+const roundColourPairs = [
+    [0.84, 1.0, 0.06], [1.0, 0.0, 0.88],
+    [1.0, 0.37, 0.06], [0.47, 0.0, 1.0],
+    [1.0, 0.06, 0.06], [0.48, 1.0, 0.47],
+    [0.28, 0.06, 1.0], [0.48, 1.0, 0.47],
+    [1.0, 0.31, 0.71], [0.69, 0.89, 1.0],
+]
+function setRoundVisibility(displayState, roundNumber=1){
+    RoundPlane.enabled = displayState == 1;
+    if(displayState == 1){
+        roundTitleEntity.setLocalPosition(0,-0.2,7);
+    }else{
+        roundTitleEntity.setLocalPosition(1000,-0.2,7);
+    }
+    roundTextElement.element.text = "Round " + roundNumber.toString();
+    const rIndex = mod01(roundNumber + colourOffset, roundColourPairs.length/2);
+    if(displayState == 1){
+        const roundAccent_1 = roundColourPairs[rIndex*2];
+        const roundAccent_2 = roundColourPairs[(rIndex*2)+1];
+        RoundPlane.render.meshInstances[0].material.setParameter('uRoundColourA',roundAccent_1);
+        RoundPlane.render.meshInstances[0].material.setParameter('uRoundColourB',roundAccent_2);
+        roundTextElement.element.color = new pc.Color(roundAccent_2[0],roundAccent_2[1],roundAccent_2[2]);
+        lastRoundBGColour = roundAccent_1;
+        fadePlaneAnim(roundAccent_1);
+    }
 }
 MainScene.prototype.newText = function(defaultText, parent, offset, scale, color=[1.0,1.0,1.0], fontID=0, autoSizingData=[5.2,10.2,14], leftAlign=false) {
     // defaultText = "d";
@@ -755,6 +833,7 @@ MainScene.prototype.newText = function(defaultText, parent, offset, scale, color
     }
     allText.push(newTextObject);
     if(leftAlign) allLobbyTextElements.push(textElem);
+    if(defaultText == 'Round') roundTextElement = textElem;
 
     return textElem;
 };
@@ -847,6 +926,7 @@ MainScene.prototype.resizeMethod = function() {
         titlePlane.setLocalPosition(0,(codeScale / 2) + 0.6,1.3);
         qrSkull.setLocalScale(codeScale * 0.25,codeScale * 0.25,codeScale * 0.25);
     }
+    if(RoundPlane != null) RoundPlane.setLocalScale(orthoHeight * (dim[0] / dim[1]) * 2,1,orthoHeight * 2);
 
     const textScale = 1.0 * pc_dpi;
     // const textScale = 1.0;

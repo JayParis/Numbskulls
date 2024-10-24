@@ -31,6 +31,8 @@ const assets = {
     skullFS: new pc.Asset("Skull-FS", "shader", { url: "./assets/shaders/skull-fs.glsl", }),
     reverseRainbowVS: new pc.Asset("Reverse-Rainbow-VS", "shader", { url: "./assets/shaders/reverse-rainbow-vs.glsl", }),
     reverseRainbowFS: new pc.Asset("Reverse-Rainbow-FS", "shader", { url: "./assets/shaders/reverse-rainbow-fs.glsl", }),
+    roundVS: new pc.Asset("Round-VS", "shader", { url: "./assets/shaders/round-vs.glsl", }),
+    roundFS: new pc.Asset("Round-FS", "shader", { url: "./assets/shaders/round-fs.glsl", }),
     // heartVS: new pc.Asset("Heart-VS", "shader", { url: "./assets/shaders/heart-vs.glsl", }),
     // heartFS: new pc.Asset("Heart-FS", "shader", { url: "./assets/shaders/heart-fs.glsl", }),
     // heartOutlineVS: new pc.Asset("Heart-Outline-VS", "shader", { url: "./assets/shaders/heart-outline-vs.glsl", }),
@@ -82,10 +84,13 @@ Array.prototype.pPop = function (index) {
 
 function getMatchupOrder(playerCount, promptListLength){
     var ret = '';
+    var matchupCount = 0;
 
     const appendToMatchup = (player_a, player_b, question) => {
+        matchupCount += 1;
         const beginning = ret == '' ? '' : ',';
-        ret += beginning + '[' + String(player_a) + ', ' + String(player_b) + ', ' + String(question) + ']'
+        ret += beginning + String(player_a) + ',' + String(player_b) + ',' + String(question);
+        // ret += beginning + '[' + String(player_a) + ', ' + String(player_b) + ', ' + String(question) + ']';
     }
 
     var promptIndices = [];
@@ -138,6 +143,7 @@ function getMatchupOrder(playerCount, promptListLength){
 
         appendToMatchup(p1,p2,q);
     }
+    // console.log(matchupCount);
     // console.log(ret);
     return ret;
 }
