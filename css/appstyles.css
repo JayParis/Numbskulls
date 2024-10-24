@@ -4,7 +4,7 @@
 
 @font-face {
     font-family: PPMori;
-    src: url('/assets/fonts/PPMori-Regular.otf');
+    src: url('https://raw.githubusercontent.com/JayParis/Numbskulls/refs/heads/main/assets/fonts/PPMori-Regular.otf');
 }
 html {
     height: 100%;
