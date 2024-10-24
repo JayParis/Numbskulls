@@ -16,8 +16,10 @@ const assets = {
     skullTex_6: new pc.Asset("Skull-Tex-6", "texture", { url: "./assets/textures/skull-6.png" }, { type: pc.TEXTURETYPE_RGBP, mipmaps: false } ),
     skullTex_7: new pc.Asset("Skull-Tex-7", "texture", { url: "./assets/textures/skull-7.png" }, { type: pc.TEXTURETYPE_RGBP, mipmaps: false } ),
     skullTex_8: new pc.Asset("Skull-Tex-8", "texture", { url: "./assets/textures/skull-8.png" }, { type: pc.TEXTURETYPE_RGBP, mipmaps: false } ),
+    allPromptsAnsweredTex: new pc.Asset("All-Prompts-Answered-Tex", "texture", { url: "./assets/textures/all-prompts-answered.png" }, { type: pc.TEXTURETYPE_RGBP, mipmaps: false } ),
     
     // Models
+    voteButton: new pc.Asset("Vote-Button", "container", { url: "./assets/models/vote-button.glb", }),
     // heartGLB: new pc.Asset("Heart", "container", { url: "./assets/models/heart.glb", }),
     // spellingUI: new pc.Asset("Spelling-UI", "container", { url: "./assets/models/spelling-ui.glb", }),
     // opponentUI: new pc.Asset("Opponent-UI", "container", { url: "./assets/models/opponent-ui.glb", }),

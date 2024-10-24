@@ -31,6 +31,9 @@
     <!-- <button id="create-room-button">Create Room</button> -->
 
     <div class="input-field-cont">
+        <div class="timer-cont" id="timer-cont-id">
+            <div class="timer" id="timer-id">90s</div>
+        </div>
         <div class="input-container">
             <div class="input-entry-area" id="input-entry-area-id">
                 <div class="input-overlay-message" id="input-overlay-message-id">
@@ -46,8 +49,9 @@
     <canvas id='application'></canvas>
     <script>
         window.checkEnter = function(ele) {
-            if(event.key === 'Enter') {
+            if(event.key === 'Enter' && document.getElementById('answer-field-id').value.length > 2) {
                 if(myState.gameStateID == 0) app.fire('pc-name-submit');
+                if(myState.gameStateID == 1) app.fire('pc-answer-submit');
                 document.getElementById('answer-field-id').blur();
             }
         }

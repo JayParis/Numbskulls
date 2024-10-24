@@ -101,6 +101,18 @@ const machine = createMachine({
 			onUpdate(dt) { answering_onUpdate(dt); }
 		},
 		transitions: {
+			goToVoting: {
+				target: 'voting', action() {},
+			},
+		},
+	},
+    voting: {
+		actions: {
+			onEnter() { reviewLoop_onEnter(); },
+			onExit() { reviewLoop_onExit(); },
+			onUpdate(dt) { reviewLoop_onUpdate(dt); }
+		},
+		transitions: {
 			switch: {
 				target: 'homepage', action() {},
 			},
@@ -177,7 +189,9 @@ function lobby_onEnter(){
         if(!w.isHost) return;
         
         if(cRect(e).y < 0.2 && timeInState > 0.5){ // Start game
-            writeNewExchange('STARTING', getMatchupOrder(7,promptsObj.length));
+            const matchupString = getMatchupOrder(myState.playersInGame, promptsObj.prompts.length);
+            myState.matchups = parseMatchupString(matchupString);
+            writeNewExchange('STARTING', matchupString);
             state = machine.transition(state, 'goToRound');
         }
     });
@@ -195,9 +209,11 @@ function newRound_onEnter(){
     roundIntroTimer = 0.0;
     movedIntoAnswering = false;
     setInputVisibility(0);
-    for (let i = 0; i < 8; i++) {
-        skulls[i].setLocalPosition(-100,-100,-100);
-    }
+    layoutLobbyScreen(true);
+    if(w.isHost) resetHostReadyCount();
+    // for (let i = 0; i < 8; i++) {
+    //     skulls[i].setLocalPosition(-100,-100,-100);
+    // }
     app.on('move-into-answering',() =>{
         state = machine.transition(state, 'goToAnswering');
     });
@@ -216,15 +232,221 @@ function newRound_onUpdate(dt){
 function newRound_onExit(){ app.off('move-into-answering'); }
 
 function answering_onEnter(){
+    myState.gameStateID = 1;
     setRoundVisibility(0,myState.currentRound);
     fadePlaneAnim(lastRoundBGColour);
-}
-function answering_onUpdate(dt){}
-function answering_onExit(){}
+    setInputVisibility(1);
+    clearInputField();
+    setTimerVisibility(1);
+    resetAndStartTimer();
 
-function reviewLoop_onEnter(){}
-function reviewLoop_onUpdate(dt){}
-function reviewLoop_onExit(){}
+    displaySkullsTypingState([]);
+    app.on('pc-update-skulls-ready',(e) => {
+        const splitString = String(e).split(',');
+        const finalReadyArray = [];
+        for (let i = 0; i < splitString.length; i++) { finalReadyArray.push(parseInt(splitString[i])); }
+        displaySkullsTypingState(finalReadyArray);
+    });
+
+    // Allocate prompts, some will have only one
+    var currentAnswerIndex = 0;
+    var myFreq = 0;
+    var myQuestionsIndices = [];
+
+    for (let i = 0; i < myState.matchups.length; i++) {
+        const group = myState.matchups[i];
+        if(group[0] == myState.playerID || group[1] == myState.playerID){
+            myFreq += 1;
+            // const promptText = parsePromptText(promptsObj.prompts[myQuestionsIndices[0]].text);
+            myQuestionsIndices.push(group[2]);
+        }
+    }
+    
+    centerPromptEntity.setLocalPosition(0,0,0);
+    const setQuestion = (i) => {
+        centerPromptElement.element.text = parsePromptText(promptsObj.prompts[i].text);
+        centerPromptElement.element.minFontSize = promptsObj.prompts[i].minFontSize;
+        centerPromptElement.element.maxFontSize = promptsObj.prompts[i].maxFontSize;
+        centerPromptElement.element.lineHeight = promptsObj.prompts[i].lineHeight;
+    };
+    setQuestion(myQuestionsIndices[0]);
+
+    app.on('pc-answer-submit',() =>{
+        currentAnswerIndex += 1;
+        if(myFreq == 1){
+            // End early
+            setInputVisibility(2);
+            if(w.isHost){
+                hostReadyCount[0] = 1;
+                displaySkullsTypingState(hostReadyCount);
+            }
+            if(w.isHost){ writeNewExchange('UPDATEREADY', readyCountToString()); }else{ writeNewExchange('ANSWEREDALL','x'); }
+            allAnsweredGraphic.enabled = true;
+            centerPromptEntity.setLocalPosition(1110,1110,1110);
+            setTimerVisibility(2);
+            w.dbSet(w.dbRef(w.db, `game_room/players/player_${(myState.playerID+1).toString()}/answer_1`), String(inputFieldElem.value));
+        }else{
+            setQuestion(myQuestionsIndices[1]);
+        }
+        if(currentAnswerIndex == 1) w.dbSet(w.dbRef(w.db, `game_room/players/player_${(myState.playerID+1).toString()}/answer_1`), String(inputFieldElem.value));
+        if(currentAnswerIndex >= 2){
+            w.dbSet(w.dbRef(w.db, `game_room/players/player_${(myState.playerID+1).toString()}/answer_2`), String(inputFieldElem.value));
+            setInputVisibility(2);
+            if(w.isHost){
+                hostReadyCount[0] = 1;
+                displaySkullsTypingState(hostReadyCount);
+            }
+            if(w.isHost){ writeNewExchange('UPDATEREADY', readyCountToString()); }else{ writeNewExchange('ANSWEREDALL','x'); }
+            allAnsweredGraphic.enabled = true;
+            centerPromptEntity.setLocalPosition(1110,1110,1110);
+            setTimerVisibility(2);
+
+            // let randIndex = Math.floor((Math.random() * promptsObj.prompts.length) * 0.999999);
+            // setQuestion(randIndex);
+        }
+        clearInputField();
+    });
+    app.on('pc-enter-review',() => {
+        state = machine.transition(state, 'goToVoting');        
+    });
+}
+function answering_onUpdate(dt){
+    if(w.isHost && timeInState > 1 && currentDisplayTimer < 0 && currentDisplayTimer > -5){
+        for (let i = 0; i < myState.playersInGame; i++) {
+            hostReadyCount[i] = 1;
+        }
+        state = machine.transition(state, 'goToVoting');
+        writeNewExchange('REVIEWING');
+        stopTimer();
+    }
+}
+function answering_onExit(){ allAnsweredGraphic.enabled = false; centerPromptEntity.setLocalPosition(1110,1110,1110); app.off('pc-answer-submit'); app.off('pc-update-skulls-ready'); app.off('pc-enter-review'); }
+
+var voteStepIndex = -1;
+var votingOpen = false;
+function reviewLoop_onEnter(){
+    collectAnswers();
+    myState.gameStateID = 2;
+    setInputVisibility(0);
+    clearInputField();
+    setTimerVisibility(0);
+    stopTimer();
+    voteStepIndex = -1;
+    votingOpen = false;
+
+    for (let i = 0; i < 8; i++) {
+        const skull = skulls[i];
+        skull.setLocalPosition(1000,1000,1000);
+    }
+
+    setTimeout(() => {
+        app.fire('show-hide-voting-intro', true);
+    }, 200);
+
+    setTimeout(() => {
+        app.fire('show-hide-voting-intro', false);
+    }, 2000);
+    if(w.isHost){
+        setTimeout(() => {
+            app.fire('vote-step');
+            writeNewExchange('VOTE');
+        }, 2200);
+    }
+
+    app.on('vote-step',() => {
+        resetVoteDistribution();
+        timeInState = 0;
+        app.fire('reset-vote');
+        app.fire('show-hide-voting-ui', true);
+        voteStepIndex += 1;
+        if(voteStepIndex >= myState.matchups.length + 111){ // - 1
+            console.log('VOTING PHASE DONE');
+        }else{
+            setTimeout(() => {
+            
+                const topIndex = myState.matchups[voteStepIndex][0];
+                myState.currentTopIndex = topIndex;
+                const bottomIndex = myState.matchups[voteStepIndex][1];
+                myState.currentBottomIndex = bottomIndex;
+                const isItSecond_top = secondQuestionTracking[topIndex] > 0;
+                const isItSecond_bottom = secondQuestionTracking[bottomIndex] > 0;
+                secondQuestionTracking[topIndex] += 1;
+                secondQuestionTracking[bottomIndex] += 1;
+                
+                const questionIndex = myState.matchups[voteStepIndex][2];
+                const questionText = parsePromptText(promptsObj.prompts[questionIndex].text);
+                const topAnswer = myState.allPlayerAnswers[(topIndex  * 2) + (isItSecond_top ? 1:0)];
+                const bottomAnswer = myState.allPlayerAnswers[(bottomIndex  * 2) + (isItSecond_bottom ? 1:0)];
+    
+                if(w.isHost){
+                    voteDistribution[topIndex] = 2;
+                    voteDistribution[bottomIndex] = 2;
+                }
+
+                myState.cannotVote = myState.playerID == topIndex || myState.playerID == bottomIndex;
+                app.fire('show-hide-cannot-vote', myState.cannotVote);
+    
+                app.fire('set-question-text', questionText);
+                app.fire('update-answers-text', [topAnswer,bottomAnswer]);
+    
+                votingOpen = myState.cannotVote == false;
+                resetAndStartTimer(20);
+                setTimerVisibility(2);
+            }, 500);
+        }
+    });
+
+    app.on('pc-vote-click', (e) => {
+        if(!votingOpen) return;
+
+        if(cRect(e).y > 0.5){ // Top vote
+            app.fire('cast-vote',true);
+            votingOpen = false;
+            if(w.isHost){
+                voteDistribution[0] = 1;
+                voteCount += 1;
+                checkVotes();
+            }else{ writeNewExchange('VOTE','TOP'); }
+        }
+        if(cRect(e).y < 0.5){ // Bottom vote
+            app.fire('cast-vote',false);
+            votingOpen = false;
+            if(w.isHost){
+                voteDistribution[0] = 0;
+                voteCount += 1;
+                checkVotes();
+            }else{ writeNewExchange('VOTE','BOTTOM'); }
+        }
+    });
+
+    app.on('all-voting-done', (e) => {
+        const splitString = String(e).split(',');
+        const finalVoteArray = [];
+        for (let i = 0; i < splitString.length; i++) { finalVoteArray.push(parseInt(splitString[i])); }
+        voteDistribution = finalVoteArray;
+
+        stopTimer();
+        setTimerVisibility(0);
+        app.fire('snap-skulls',[myState.currentTopIndex,myState.currentBottomIndex]);
+        app.fire('update-player-names',[myState.allPlayerNames[myState.currentTopIndex],myState.allPlayerNames[myState.currentBottomIndex]]);
+        app.fire('reveal-results',[myState.currentTopIndex,myState.currentBottomIndex]);
+
+        setTimeout(() => {
+            if(w.isHost){
+                app.fire('vote-step');
+                writeNewExchange('VOTE');
+            }
+        }, 4000);
+    });
+}
+function reviewLoop_onUpdate(dt){
+    if(w.isHost && timeInState > 1 && currentDisplayTimer < 0 && currentDisplayTimer > -5){
+        writeNewExchange('REVEAL',voteDistributionToString());
+        app.fire('all-voting-done', voteDistributionToString());
+        stopTimer();
+    }
+}
+function reviewLoop_onExit(){ app.off('vote-step'); app.off('pc-vote-click'); app.off('all-voting-done'); }
 
 function scores_onEnter(){}
 function scores_onUpdate(dt){}
@@ -252,7 +474,28 @@ var myState = {
         '^!*',
         '^!*',
     ],
-    matchups: []
+    allPlayerAnswers: [
+        '<',
+        '<',
+        '<',
+        '<',
+        '<',
+        '<',
+        '<',
+        '<',
+        '<',
+        '<',
+        '<',
+        '<',
+        '<',
+        '<',
+        '<',
+        '<',
+    ],
+    matchups: [],
+    currentTopIndex: 0,
+    currentBottomIndex: 0,
+    cannotVote: false
 };
 var lastRoundBGColour = [0,0,0];
 function getExchangeKeyValue(fullString){
@@ -285,13 +528,40 @@ function parseMatchupString(orderString){
 
     for (let i = 0; i < splitString.length / 3; i++) {
         const group = [
-            splitString[i*3],
-            splitString[(i*3)+1],
-            splitString[(i*3)+2]
+            parseInt(splitString[i*3]),
+            parseInt(splitString[(i*3)+1]),
+            parseInt(splitString[(i*3)+2])
         ];
         retArray.push(group);
     }
     return retArray;
+}
+function collectAnswers(){
+    w.dbGet(w.dbRef(w.db, 'game_room')).then((snap) => {
+        const dbObj = snap.val();
+        if(dbObj.block_all_traffic === true) return;
+
+        myState.allPlayerAnswers[0] = dbObj.players.player_1.answer_1;
+        myState.allPlayerAnswers[1] = dbObj.players.player_1.answer_2;
+        myState.allPlayerAnswers[2] = dbObj.players.player_2.answer_1;
+        myState.allPlayerAnswers[3] = dbObj.players.player_2.answer_2;
+        myState.allPlayerAnswers[4] = dbObj.players.player_3.answer_1;
+        myState.allPlayerAnswers[5] = dbObj.players.player_3.answer_2;
+        myState.allPlayerAnswers[6] = dbObj.players.player_4.answer_1;
+        myState.allPlayerAnswers[7] = dbObj.players.player_4.answer_2;
+        myState.allPlayerAnswers[8] = dbObj.players.player_5.answer_1;
+        myState.allPlayerAnswers[9] = dbObj.players.player_5.answer_2;
+        myState.allPlayerAnswers[10] = dbObj.players.player_6.answer_1;
+        myState.allPlayerAnswers[11] = dbObj.players.player_6.answer_2;
+        myState.allPlayerAnswers[12] = dbObj.players.player_7.answer_1;
+        myState.allPlayerAnswers[13] = dbObj.players.player_7.answer_2;
+        myState.allPlayerAnswers[14] = dbObj.players.player_8.answer_1;
+        myState.allPlayerAnswers[15] = dbObj.players.player_8.answer_2;
+    });
+}
+var secondQuestionTracking = [0,0,0,0,0,0,0,0];
+function resetSecondQuestionTrackin(){
+    secondQuestionTracking = [0,0,0,0,0,0,0,0];
 }
 
 var uTime = 0;
@@ -299,12 +569,14 @@ var ui_bottom, ui_top, ui_center;
 var backgroundPatternShaderDef, backgroundPatternShader, backgroundPatternPlane;
 var QRShaderDef, QRShader, QRPlane, CodePlane, titlePlane, qrSkull, namingEntity;
 var RoundShaderDef, RoundShader, RoundPlane, roundTitleEntity, roundTextElement;
+var centerPromptEntity, centerPromptElement, allAnsweredGraphic;
 var fadeRect, fadePlaneAnim_t = 0.0, fadePlaneColour=[0,0,0];
 var skullShaderDef, skullShader;
 const allText = [];
 const allLobbyTextEntities = [], allLobbyTextElements = [];
 const skulls = [];
 var inputFieldElem, inputFieldAnswerElem;
+var timerElem, timerContElem, currentDisplayTimer = -10, secondsTimer = 1;
 
 const playerColoursAndBW = [
     [1.0, 1.0, 1.0, 0.0],
@@ -356,6 +628,7 @@ function setInputVisibility(displayState){ // 0 = Hidden, 1 = Text entry, 2 = Fi
     document.getElementById('input-overlay-message-id').style.display = displayState == 2 ? 'block' : 'none'
     root.style.setProperty('--border-colour', displayState == 2 ? '#353535' : '#ffffff');
 }
+function clearInputField() {inputFieldElem.value = ''; resetInputFieldMessage();}
 function setQRBackgroundVisibility(displayState){
     QRPlane.enabled = displayState == 1;
     CodePlane.enabled = displayState == 1;
@@ -365,6 +638,20 @@ function setQRBackgroundVisibility(displayState){
 function setDevMenuVisibility(displayState){
     document.getElementById('dev-menu-id').style.display = displayState == 0 ? 'none' : 'block';
 }
+function setTimerVisibility(displayState){ // 0 = Hidden, 1 = Timing pre-input, 2 = Timing post-input
+    // timerElem.style.back
+    document.getElementById('timer-id').style.backgroundColor = displayState == 1 ? "#FFFF00FF" : "#00000000";
+    document.getElementById('timer-id').style.borderColor = displayState == 1 ? "#FFFF00FF" : "#FFFFFFFF";
+    document.getElementById('timer-id').style.color = displayState == 1 ? "#000000" : "#FFFFFF";
+    document.getElementById('timer-id').style.opacity = displayState == 0 ? "0%" : "100%";
+}
+function resetAndStartTimer(customTime=20){ // 90
+    currentDisplayTimer = customTime; 
+    secondsTimer = 1;
+}
+function stopTimer(){
+    currentDisplayTimer = -10;
+}
 
 
 MainScene.prototype.initialize = function() {
@@ -373,27 +660,28 @@ MainScene.prototype.initialize = function() {
     ui_center = new pc.Entity('UI-Center'); app.root.addChild(ui_center);
     ui_bottom = new pc.Entity('UI-Bottom'); app.root.addChild(ui_bottom);
 
+    
+
     MainScene.prototype.createBackground();
     MainScene.prototype.createQR();
     MainScene.prototype.createNamingScreen();
     MainScene.prototype.createLobbyScreen();
     MainScene.prototype.createSkulls();
     MainScene.prototype.createRoundScreen();
+    MainScene.prototype.createCenterPrompt();
+    MainScene.prototype.createVoteUI();
     MainScene.prototype.createFadePlane(); // Must be last
 
-    const centerTextElem = new pc.Entity('CenterTextElem');
-    centerTextElem.setLocalEulerAngles(90,0,0);
-    ui_center.addChild(centerTextElem);
+    
 
     getPrompts().then(() => {
         const indexToGet = promptsObj.prompts.length-1;
-        const promptText = parsePromptText(promptsObj.prompts[indexToGet].text);
-        const promptMinFontSize = promptsObj.prompts[indexToGet].minFontSize;
-        const promptMaxFontSize = promptsObj.prompts[indexToGet].maxFontSize;
-        const promptLineHeight = promptsObj.prompts[indexToGet].lineHeight;
+        // const promptText = parsePromptText(promptsObj.prompts[indexToGet].text);
+        // const promptMinFontSize = promptsObj.prompts[indexToGet].minFontSize;
+        // const promptMaxFontSize = promptsObj.prompts[indexToGet].maxFontSize;
+        // const promptLineHeight = promptsObj.prompts[indexToGet].lineHeight;
         // MainScene.prototype.newText(promptText,centerTextElem,[0,0.0,1],0.92,[1,1,1],0,[promptMinFontSize, promptMaxFontSize, promptLineHeight]);
-        console.log('Got Prompts');
-        this.resizeMethod();
+        // this.resizeMethod();
     });
 
 
@@ -401,6 +689,9 @@ MainScene.prototype.initialize = function() {
     window.addEventListener('orientationchange', () => this.resizeMethod());
     this.resizeMethod();
 
+    timerElem = document.getElementById('timer-id');
+    timerContElem = document.getElementById('timer-cont-id');
+    setTimerVisibility(0);
     inputFieldAnswerElem = document.getElementById('answer-field-line-id');
     inputFieldElem = document.getElementById('answer-field-id');
     inputFieldElem.addEventListener("input", (event) => {
@@ -426,16 +717,21 @@ MainScene.prototype.initialize = function() {
         window.addEventListener("touchstart", (event) => {
             app.fire('pc-home-click',parseInputEvent(event));
             app.fire('pc-lobby-click',parseInputEvent(event));
+            app.fire('pc-vote-click',parseInputEvent(event));
         });
     }else{
         window.addEventListener("mousedown", (event) => {
             app.fire('pc-home-click',parseInputEvent(event));
             app.fire('pc-lobby-click',parseInputEvent(event));
+            app.fire('pc-vote-click',parseInputEvent(event));
         });
     }
     
     window.addEventListener('keydown',(e) => {
         return;
+        if(e.key == 't'){ setTimerVisibility(0); } // DELETE
+        if(e.key == 'y'){ setTimerVisibility(1); } // DELETE
+        if(e.key == 'u'){ setTimerVisibility(2); } // DELETE
         if(e.key == 'g'){ setRoundVisibility(1, myState.currentRound); myState.currentRound += 1; } // DELETE
         if(e.key == 'e'){
             const orderString = getMatchupOrder(7,promptsObj.length);
@@ -496,22 +792,25 @@ function resetInputFieldMessage(){
 
 function resetGameRoom(bypass=false){
     if(w.isHost === false && !bypass) return;
+
+    // iconOffset = Math.floor(Math.random() * 7.99999);
+    // colourOffset = Math.floor(Math.random() * 7.99999);
     w.dbSet(w.dbRef(w.db, 'player_count'), 1);
     w.dbSet(w.dbRef(w.db, 'game_room'), {
         game_exchange: '^RESET:x',
         started: false,
         block_all_traffic: false,
-        icon_offset: 0,
-        colour_offset: 0,
+        icon_offset: iconOffset,
+        colour_offset: colourOffset,
         players: {
-            player_1: { exchange: "^NIL:x", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
-            player_2: { exchange: "^NIL:x", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
-            player_3: { exchange: "^NIL:x", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
-            player_4: { exchange: "^NIL:x", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
-            player_5: { exchange: "^NIL:x", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
-            player_6: { exchange: "^NIL:x", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
-            player_7: { exchange: "^NIL:x", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
-            player_8: { exchange: "^NIL:x", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 }
+            player_1: { exchange: "^NIL:x", name: "NIL", answer_1: "<", answer_2: "<", score: 0 },
+            player_2: { exchange: "^NIL:x", name: "NIL", answer_1: "<", answer_2: "<", score: 0 },
+            player_3: { exchange: "^NIL:x", name: "NIL", answer_1: "<", answer_2: "<", score: 0 },
+            player_4: { exchange: "^NIL:x", name: "NIL", answer_1: "<", answer_2: "<", score: 0 },
+            player_5: { exchange: "^NIL:x", name: "NIL", answer_1: "<", answer_2: "<", score: 0 },
+            player_6: { exchange: "^NIL:x", name: "NIL", answer_1: "<", answer_2: "<", score: 0 },
+            player_7: { exchange: "^NIL:x", name: "NIL", answer_1: "<", answer_2: "<", score: 0 },
+            player_8: { exchange: "^NIL:x", name: "NIL", answer_1: "<", answer_2: "<", score: 0 }
         }
     });
 }
@@ -520,14 +819,55 @@ function receivedGameStateExchange(dataString){
     if(getExchangeKeyValue(dataString).key == 'WAITING') app.fire('check-lobby-size');
     if(getExchangeKeyValue(dataString).key == 'STARTING'){
         myState.matchups = parseMatchupString(getExchangeKeyValue(dataString).value);
-        console.log(myState.matchups);
         app.fire('move-into-round');
     }
     if(getExchangeKeyValue(dataString).key == 'ANSWERING') app.fire('move-into-answering');
+    if(getExchangeKeyValue(dataString).key == 'UPDATEREADY'){
+        app.fire('pc-update-skulls-ready', getExchangeKeyValue(dataString).value);
+    }
+    if(getExchangeKeyValue(dataString).key == 'REVIEWING') app.fire('pc-enter-review');
+    if(getExchangeKeyValue(dataString).key == 'VOTE') app.fire('vote-step');
+    if(getExchangeKeyValue(dataString).key == 'REVEAL') app.fire('all-voting-done',getExchangeKeyValue(dataString).value);
 }
 function receivedPlayerExchange(dataString, playerIndex){
     console.log(`FROM PLAYER ${playerIndex+1}: ` + dataString);
     if(getExchangeKeyValue(dataString).key == 'JOINED') {app.fire('check-lobby-size'); writeNewExchange('WAITING');}
+    if(getExchangeKeyValue(dataString).key == 'ANSWEREDALL') {
+        hostReadyCount[playerIndex] = 1;
+        writeNewExchange('UPDATEREADY', readyCountToString());
+        displaySkullsTypingState(hostReadyCount);
+    }
+    if(getExchangeKeyValue(dataString).key == 'VOTE') {
+        voteDistribution[playerIndex] = getExchangeKeyValue(dataString).value == 'TOP' ? 1 : 0;
+        voteCount += 1;
+        checkVotes();
+    }
+}
+var hostReadyCount = [];
+var hasCollectedAnswers = false;
+function resetHostReadyCount() {
+    hostReadyCount = [];
+    hasCollectedAnswers = false;
+    for (let i = 0; i < myState.playersInGame; i++) { hostReadyCount.push(0); }
+}
+function readyCountToString(){
+    var ret = '';
+    for (let i = 0; i < hostReadyCount.length; i++) { ret += hostReadyCount[i].toString() + (i == hostReadyCount.length-1 ? '' : ','); }
+    return ret;
+}
+var voteCount = 0;
+function checkVotes(){
+    if(voteCount >= (myState.playersInGame-2)){
+        setTimeout(() => {
+            writeNewExchange('REVEAL',voteDistributionToString());
+            app.fire('all-voting-done',voteDistributionToString());
+        }, 1000);
+    }
+}
+function voteDistributionToString(){
+    var ret = '';
+    for (let i = 0; i < voteDistribution.length; i++) { ret += voteDistribution[i].toString() + (i == voteDistribution.length-1 ? '' : ','); }
+    return ret;
 }
 
 MainScene.prototype.createBackground = function(){
@@ -654,11 +994,11 @@ MainScene.prototype.createLobbyScreen = function() {
         newLobbyTextEntity.setLocalEulerAngles(90,0,0);
         ui_center.addChild(newLobbyTextEntity);
         newLobbyTextEntity.setLocalPosition(0,-1033,0);
-        MainScene.prototype.newText("GRT: " + i.toString(),newLobbyTextEntity,[0,0.0,1],0.92,[1,1,1],0,[5.2,5.2,14],true);
+        MainScene.prototype.newText("~",newLobbyTextEntity,[0,0.0,1],0.92,[1,1,1],0,[5.2,5.2,14],true);
         allLobbyTextEntities.push(newLobbyTextEntity);
     }
 };
-function layoutLobbyScreen(){
+function layoutLobbyScreen(hide=false){
     var numberOfPlayers = myState.playersInGame;
     var spacing = [
         0.75, // 1
@@ -672,7 +1012,7 @@ function layoutLobbyScreen(){
     ]
     for (let i = 0; i < 8; i++) {
     // for (let i = 7; i >= 0; i--) {
-        if(i >= numberOfPlayers){
+        if(i >= numberOfPlayers || hide){
             allLobbyTextEntities[i].setLocalPosition(1000,1000,1000);
             skulls[i].setLocalPosition(1000,1000,1000);
             continue;
@@ -720,6 +1060,44 @@ MainScene.prototype.createSkulls = function(){
         skulls.push(newSkull);
     }
 };
+function displaySkullsTypingState(readyArray=[]){
+    var noReady = readyArray.length <= 1;
+    
+    var playerCount = myState.playersInGame;
+    // var playerCount = 3; // DELETE
+    var numberOfReady = 0;
+    for (let i = 0; i < 8; i++) {
+        const skull = skulls[i];
+        if(i >= playerCount){
+            allLobbyTextEntities[i].setLocalPosition(1000,1000,1000);
+            skulls[i].setLocalPosition(1000,1000,1000);
+            continue;
+        }
+        
+        skull.setLocalScale(8,8,8);
+        // skull.setLocalPosition(0,-10 * i,1);
+        let centerArray = centeredList(i,playerCount,9.75,[0,-10,1]);
+        skull.setLocalPosition(centerArray[0],centerArray[1],centerArray[2]);
+        if(noReady){
+            skull.render.meshInstances[0].material.setParameter('uAlpha', 0.125);
+        }else{
+            skull.render.meshInstances[0].material.setParameter('uAlpha', readyArray[i] == 1 ? 1 : 0.125);
+            if(readyArray[i] == 1) numberOfReady += 1;
+        }
+    }
+
+    if(w.isHost && numberOfReady >= playerCount && !hasCollectedAnswers){
+        // Move on
+        hasCollectedAnswers = true;
+        setTimeout(() => {
+            if(myState.gameStateID == 1){
+                state = machine.transition(state, 'goToVoting');
+                writeNewExchange('REVIEWING');
+            }
+        }, 1500);
+        stopTimer();
+    }
+}
 MainScene.prototype.createFadePlane = function(){
 
     fadeRect = new pc.Entity("Fade-Rect");
@@ -780,7 +1158,7 @@ const roundColourPairs = [
     [1.0, 0.06, 0.06], [0.48, 1.0, 0.47],
     [0.28, 0.06, 1.0], [0.48, 1.0, 0.47],
     [1.0, 0.31, 0.71], [0.69, 0.89, 1.0],
-]
+];
 function setRoundVisibility(displayState, roundNumber=1){
     RoundPlane.enabled = displayState == 1;
     if(displayState == 1){
@@ -799,8 +1177,265 @@ function setRoundVisibility(displayState, roundNumber=1){
         lastRoundBGColour = roundAccent_1;
         fadePlaneAnim(roundAccent_1);
     }
+};
+MainScene.prototype.createCenterPrompt = function(){
+    centerPromptEntity = new pc.Entity('CenterTextElem');
+    centerPromptEntity.setLocalEulerAngles(90,0,0);
+    ui_center.addChild(centerPromptEntity);
+    centerPromptEntity.setLocalPosition(1000,1000,1000);
+    MainScene.prototype.newText("Prompt",centerPromptEntity,[0,0.0,1],0.92,[1,1,1],0);
+    this.resizeMethod();
+
+    allAnsweredGraphic = new pc.Entity('All-Answered-Graphic');
+    allAnsweredGraphic.addComponent('render', { type: 'plane' });
+    allAnsweredGraphic.render.meshInstances[0].material = new pc.BasicMaterial();
+    allAnsweredGraphic.render.meshInstances[0].material.blendType = pc.BLEND_NORMAL;
+    allAnsweredGraphic.render.meshInstances[0].material.colorMap = assets.allPromptsAnsweredTex.resource;
+    allAnsweredGraphic.render.meshInstances[0].material.color = new pc.Color(0.6,0.6,0.6);
+    allAnsweredGraphic.enabled = false;
+    allAnsweredGraphic.setLocalEulerAngles(90,0,0);
+    app.root.addChild(allAnsweredGraphic);
+    allAnsweredGraphic.setLocalPosition(0,0,9);
+    allAnsweredGraphic.setLocalScale(10,10,10);
+};
+var voteDistribution = [1,2,0,2,2,2]; // 0 = Bottom, 1 = Top, 2 = skip (playing / didn't vote)
+function resetVoteDistribution(){
+    voteDistribution = [];
+    for (let i = 0; i < myState.playersInGame; i++) { voteDistribution.push(2); }
+    voteCount = 0;
 }
-MainScene.prototype.newText = function(defaultText, parent, offset, scale, color=[1.0,1.0,1.0], fontID=0, autoSizingData=[5.2,10.2,14], leftAlign=false) {
+MainScene.prototype.createVoteUI = function(){
+
+    const votingParent = new pc.Entity('Voting-Parent');
+    ui_center.addChild(votingParent);
+    votingParent.setLocalPosition(1000,0,0);
+    
+    const readyToVoteEntity = new pc.Entity('Voting-Parent');
+    readyToVoteEntity.setLocalEulerAngles(90,0,0);
+    ui_center.addChild(readyToVoteEntity);
+    readyToVoteEntity.setLocalPosition(1000,1000.5,115);
+    const readyToVoteElem = MainScene.prototype.newText("Voting time!",readyToVoteEntity,[0,0.0,1],0.92,[1,1,1],0, [5.2,9.2,13], false, 90);
+
+    const questionEntity = new pc.Entity('Cannot-Vote');
+    questionEntity.setLocalEulerAngles(90,0,0);
+    votingParent.addChild(questionEntity);
+    questionEntity.setLocalPosition(0,65.5,15);
+    // questionEntity.setLocalPosition(0,59.5,15);
+    const questionElem = MainScene.prototype.newText("",questionEntity,[0,0.0,1],0.92,[1,1,1],0, [4.9,4.9,8], false, 90);
+
+    const youCannotVoteEntity = new pc.Entity('Cannot-Vote');
+    youCannotVoteEntity.setLocalEulerAngles(90,0,0);
+    ui_center.addChild(youCannotVoteEntity);
+    youCannotVoteEntity.setLocalPosition(1000,1000.5,115);
+    // youCannotVoteEntity.setLocalPosition(0,-55.5,15);
+    MainScene.prototype.newText("You can't vote on your own answers",youCannotVoteEntity,[0,0.0,1],0.92,[1,1,1],0, [3.0,3.0,13], false, 90);
+
+    const topVoteButton = assets.voteButton.resource.instantiateRenderEntity({});
+    topVoteButton.setLocalEulerAngles(90,0,0);
+    votingParent.addChild(topVoteButton);
+    topVoteButton.setLocalPosition(0,25,1);
+    topVoteButton.setLocalScale(19.15,19.15,19.15);
+
+    topVoteButton.render.meshInstances[1].material = new pc.BasicMaterial();
+    topVoteButton.render.meshInstances[1].material.color = new pc.Color(0.0,0.0,0.0,0.0);
+    topVoteButton.render.meshInstances[0].material = new pc.BasicMaterial();
+    topVoteButton.render.meshInstances[0].material.color = new pc.Color(0.2,0.2,0.2,1.0);
+
+
+    const bottomVoteButton = assets.voteButton.resource.instantiateRenderEntity({});
+    bottomVoteButton.setLocalEulerAngles(90,0,0);
+    votingParent.addChild(bottomVoteButton);
+    bottomVoteButton.setLocalPosition(0,-25,1);
+    bottomVoteButton.setLocalScale(19.15,19.15,19.15);
+
+    bottomVoteButton.render.meshInstances[1].material = new pc.BasicMaterial();
+    bottomVoteButton.render.meshInstances[1].material.color = new pc.Color(0.0,0.0,0.0,0.0);
+    bottomVoteButton.render.meshInstances[0].material = new pc.BasicMaterial();
+    bottomVoteButton.render.meshInstances[0].material.color = new pc.Color(0.2,0.2,0.2,1.0);
+
+    // NAMES
+    const topVoteNameEntity = new pc.Entity('Top-Vote-Entity');
+    topVoteNameEntity.setLocalEulerAngles(90,0,0);
+    votingParent.addChild(topVoteNameEntity);
+    topVoteNameEntity.setLocalPosition(11,55.5,1);
+    const topNameElem = MainScene.prototype.newText("Player top name here",topVoteNameEntity,[0,0.0,1],0.92,[1,1,1],0,[4.2,4.2,14],true);
+
+    const bottomVoteNameEntity = new pc.Entity('Bottom-Vote-Entity');
+    bottomVoteNameEntity.setLocalEulerAngles(90,0,0);
+    votingParent.addChild(bottomVoteNameEntity);
+    bottomVoteNameEntity.setLocalPosition(11,-54,1);
+    const bottomNameElem = MainScene.prototype.newText("Player bottom name here",bottomVoteNameEntity,[0,0.0,1],0.92,[1,1,1],0,[4.2,4.2,14],true);
+
+    // ANSWER TEXTS
+    const topAnswerTextEntity = new pc.Entity('Top-Answer-Text-Entity');
+    topAnswerTextEntity.setLocalEulerAngles(90,0,0);
+    votingParent.addChild(topAnswerTextEntity);
+    topAnswerTextEntity.setLocalPosition(0,25.5,15);
+    const topAnswerElem = MainScene.prototype.newText("Player answer that works really well typed here",topAnswerTextEntity,[0,0.0,1],0.92,[1,1,1],0, [5.2,9.2,13], false, 90);
+
+    const bottomAnswerTextEntity = new pc.Entity('Top-Answer-Text-Entity');
+    bottomAnswerTextEntity.setLocalEulerAngles(90,0,0);
+    votingParent.addChild(bottomAnswerTextEntity);
+    bottomAnswerTextEntity.setLocalPosition(0,-25.5,15);
+    const bottomAnswerElem = MainScene.prototype.newText("Player answer that works really well typed here",bottomAnswerTextEntity,[0,0.0,1],0.92,[1,1,1],0, [5.2,9.2,13], false, 90);
+
+    // Skull positions
+    const topSkullPosEntity = new pc.Entity('Top-Skull-Pos-Entity');
+    votingParent.addChild(topSkullPosEntity);
+    topSkullPosEntity.setLocalPosition(-37,54.5,1);
+
+    const bottomSkullPosEntity = new pc.Entity('Bottom-Skull-Pos-Entity');
+    votingParent.addChild(bottomSkullPosEntity);
+    bottomSkullPosEntity.setLocalPosition(-37,-54.5,1);
+
+
+    app.on('set-question-text',(q) => { questionElem.element.text = q; });
+    app.on('show-hide-cannot-vote',(show) => {
+        if(show){
+            youCannotVoteEntity.setLocalPosition(0,-55.5,15);
+        }else{
+            youCannotVoteEntity.setLocalPosition(1000,1000.5,115);
+        }
+    });
+    app.on('show-hide-voting-intro',(show) => {
+        if(show){
+            readyToVoteEntity.setLocalPosition(0,0.5,15);
+        }else{
+            readyToVoteEntity.setLocalPosition(1000,1000.5,115);
+        }
+    });
+    app.on('show-hide-voting-ui',(show) => {
+        if(show){
+            votingParent.setLocalPosition(0,0,0);
+        }else{
+            votingParent.setLocalPosition(1000,1000,1000);
+        }
+    });
+
+    app.on('snap-skulls',(indices) => {
+        for (let i = 0; i < 8; i++) {
+            const skull = skulls[i];
+            skull.render.meshInstances[0].setParameter('uAlpha',1.0);
+            if(i != indices[0] && i != indices[1]){
+                skull.setLocalPosition(1000,1000,1000);
+            }else{
+                let isTop = i == indices[0];
+                skull.setPosition(isTop ? topSkullPosEntity.getPosition() : bottomSkullPosEntity.getPosition());
+                skull.setLocalScale(8,8,8);
+                const accent = getPlayerColour(indices[isTop ? 0 : 1]);
+                if(isTop) topNameElem.element.color = new pc.Color(accent[0],accent[1],accent[2]);
+                else bottomNameElem.element.color = new pc.Color(accent[0],accent[1],accent[2]);
+            }
+        }
+    });
+    app.on('update-player-names',(nameStrings) => {
+        topNameElem.element.text = nameStrings[0];
+        bottomNameElem.element.text = nameStrings[1];
+    });
+    app.on('update-answers-text',(answerStrings) => {
+        topAnswerElem.element.text = answerStrings[0];
+        bottomAnswerElem.element.text = answerStrings[1];
+    });
+    app.on('cast-vote',(topOrBottom) => {
+        if(topOrBottom){
+            topVoteButton.render.meshInstances[1].material.color = new pc.Color(1.0,1.0,1.0,1.0);
+            topVoteButton.render.meshInstances[1].material.update();
+            topAnswerElem.element.color = new pc.Color(0.0,0.0,0.0,1.0);
+        }else{
+            bottomVoteButton.render.meshInstances[1].material.color = new pc.Color(1.0,1.0,1.0,1.0);
+            bottomVoteButton.render.meshInstances[1].material.update();
+            bottomAnswerElem.element.color = new pc.Color(0.0,0.0,0.0,1.0);
+        }
+    });
+    app.on('reveal-results',(playerIndices) => {
+        if(topVoteButton.render.meshInstances[1].material.color.r > 0.5){
+            const accent = getPlayerColour(playerIndices[0]);
+            const accentText = getPlayerTextColour(playerIndices[0]);
+            topAnswerElem.element.color = new pc.Color(accentText[0],accentText[1],accentText[2]);
+            topVoteButton.render.meshInstances[1].material.color = new pc.Color(accent[0],accent[1],accent[2]);
+            topVoteButton.render.meshInstances[1].material.update();
+        }
+        if(bottomVoteButton.render.meshInstances[1].material.color.r > 0.5){
+            const accent = getPlayerColour(playerIndices[1]);
+            const accentText = getPlayerTextColour(playerIndices[1]);
+            bottomAnswerElem.element.color = new pc.Color(accentText[0],accentText[1],accentText[2]);
+            bottomVoteButton.render.meshInstances[1].material.color = new pc.Color(accent[0],accent[1],accent[2]);
+            bottomVoteButton.render.meshInstances[1].material.update();
+        }
+
+        setTimeout(() => {
+            app.fire('show-distribution');
+        }, 500);
+    });
+    app.on('reset-vote',() => {
+        topVoteButton.render.meshInstances[1].material.color = new pc.Color(0,0,0,1);
+        topVoteButton.render.meshInstances[1].material.update();
+        topAnswerElem.element.color = new pc.Color(1,1,1,1);
+        bottomVoteButton.render.meshInstances[1].material.color = new pc.Color(0,0,0,1);
+        bottomVoteButton.render.meshInstances[1].material.update();
+        bottomAnswerElem.element.color = new pc.Color(1,1,1,1);
+
+        app.fire('update-answers-text',["",""]);
+        app.fire('update-player-names',['','']);
+        app.fire('set-question-text','');
+
+        for (let i = 0; i < 8; i++) {
+            skulls[i].setLocalPosition(1000,1000,1000); 
+            skulls[i].setLocalScale(8,8,8); 
+        }
+    });
+    app.on('show-distribution',() => {
+        var topVotesPlayers = [];
+        var bottomVotesPlayers = [];
+        for (let i = 0; i < voteDistribution.length; i++) {
+            if(voteDistribution[i] == 2) continue;
+            if(voteDistribution[i] == 0) bottomVotesPlayers.push(i);
+            else topVotesPlayers.push(i);
+        }
+        for (let i = 0; i < topVotesPlayers.length; i++) {
+            for (let k = 0; k < 8; k++) {
+                if(k >= voteDistribution.length){
+                    skulls[k].setLocalPosition(1000,1000,1000);
+                }else if(topVotesPlayers[i] == k){
+                    const cList = centeredList(i,topVotesPlayers.length,1.35,[0,1,7]);
+                    skulls[k].setPosition(cList[0],cList[1],cList[2]);
+                    skulls[k].setLocalScale(8,8,8); 
+                }
+            }            
+        }
+        for (let i = 0; i < bottomVotesPlayers.length; i++) {
+            for (let k = 0; k < 8; k++) {
+                if(k >= voteDistribution.length){
+                    skulls[k].setLocalPosition(1000,1000,1000);
+                }else if(bottomVotesPlayers[i] == k){
+                    const cList = centeredList(i,bottomVotesPlayers.length,1.35,[0,-1,7]);
+                    skulls[k].setPosition(cList[0],cList[1],cList[2]);
+                    skulls[k].setLocalScale(8,8,8); 
+                }
+            }            
+        }
+    });
+
+    window.addEventListener('keydown',(e) => { // DELETE
+        return;
+        if(e.key == 'b'){
+            app.fire('update-answers-text',["Answer the first","Answer the second"]);
+        }
+        if(e.key == 'n'){
+            app.fire('cast-vote',true);
+        }
+        if(e.key == 'm'){
+            app.fire('reveal-results',[4,5]);
+            app.fire('snap-skulls',[4,5]);
+            app.fire('update-player-names',['This','That']);
+        }
+        if(e.key == 'l'){
+            app.fire('reset-vote');
+        }
+    });
+
+};
+MainScene.prototype.newText = function(defaultText, parent, offset, scale, color=[1.0,1.0,1.0], fontID=0, autoSizingData=[5.2,10.2,14], leftAlign=false, widthVal=92) {
     // defaultText = "d";
     const fontRef = [assets.PPMoriSemiBold.resource];
 
@@ -818,7 +1453,7 @@ MainScene.prototype.newText = function(defaultText, parent, offset, scale, color
         alignment: leftAlign ? [0.0,0.5] : [0.5,0.5],
         autoWidth: false,
         autoFitWidth: true,
-        width: 92,
+        width: widthVal,
         wrapLines: true,
         lineHeight: autoSizingData[2]
     });
@@ -833,8 +1468,9 @@ MainScene.prototype.newText = function(defaultText, parent, offset, scale, color
         textScale: [scale,scale,scale],
     }
     allText.push(newTextObject);
-    if(leftAlign) allLobbyTextElements.push(textElem);
+    if(defaultText == '~') allLobbyTextElements.push(textElem);
     if(defaultText == 'Round') roundTextElement = textElem;
+    if(defaultText == 'Prompt') centerPromptElement = textElem;
 
     return textElem;
 };
@@ -847,6 +1483,18 @@ MainScene.prototype.update = function(dt) {
     if(uTime > 600) resetUTime();
     if(backgroundPatternPlane != null) backgroundPatternPlane.render.meshInstances[0].material.setParameter('uTime', uTime);
     if(QRPlane != null) QRPlane.render.meshInstances[0].material.setParameter('uTime', uTime);
+
+    if(currentDisplayTimer > -1){
+        // Show timer
+
+        secondsTimer -= dt;
+        if(secondsTimer <= 0){
+            currentDisplayTimer -= 1;
+            secondsTimer = 1;
+        }
+        timerElem.innerText = Math.max(currentDisplayTimer,0).toString() + 's';
+    }
+    timerContElem.style.display = currentDisplayTimer < 0 ? 'none' : 'flex';
 
     machine.update(state, dt);
 
@@ -928,6 +1576,10 @@ MainScene.prototype.resizeMethod = function() {
         qrSkull.setLocalScale(codeScale * 0.25,codeScale * 0.25,codeScale * 0.25);
     }
     if(RoundPlane != null) RoundPlane.setLocalScale(orthoHeight * (dim[0] / dim[1]) * 2,1,orthoHeight * 2);
+    if(allAnsweredGraphic != null) {
+        let graphicScale = (dim[0] / dim[1]) * 15.5; // 13.5
+        allAnsweredGraphic.setLocalScale(graphicScale,graphicScale,graphicScale);
+    }
 
     const textScale = 1.0 * pc_dpi;
     // const textScale = 1.0;

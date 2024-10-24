@@ -186,3 +186,29 @@ input:valid + .label-line{
     color: white;
     display: none;
 }
+.timer-cont {
+    position: relative;
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    /* align-items: flex-end; */
+    justify-content: flex-end;
+    /* background-color: red; */
+}
+.timer {
+    position: relative;
+    background-color: yellow;
+    color: #000000;
+    width: 50px;
+    margin-left: 20px;
+    margin-right: 20px;
+    padding: 6px 5px 5px 5px;
+    border-radius: 10px;
+    margin-bottom: 10px;
+    display: grid;
+    justify-content: center;
+    font-size: 1.4rem;
+    text-align: center;
+    border: 2px solid #ffff00;
+    opacity: 0%;
+}
