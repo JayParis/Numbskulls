@@ -13,6 +13,7 @@ function createMachine(stateMachineDefinition) {
 			const destinationState = destinationTransition.target;
 			const destinationStateDefinition = stateMachineDefinition[destinationState];
 
+            timeInState = 0;
 			destinationTransition.action();
 			currentStateDefinition.actions.onExit();
 			destinationStateDefinition.actions.onEnter();
@@ -76,6 +77,30 @@ const machine = createMachine({
 			onUpdate(dt) { lobby_onUpdate(dt); }
 		},
 		transitions: {
+			goToRound: {
+				target: 'round', action() {},
+			},
+		},
+	},
+    round: {
+		actions: {
+			onEnter() { newRound_onEnter(); },
+			onExit() { newRound_onExit(); },
+			onUpdate(dt) { newRound_onUpdate(dt); }
+		},
+		transitions: {
+			goToAnswering: {
+				target: 'answering', action() {},
+			},
+		},
+	},
+    answering: {
+		actions: {
+			onEnter() { answering_onEnter(); },
+			onExit() { answering_onExit(); },
+			onUpdate(dt) { answering_onUpdate(dt); }
+		},
+		transitions: {
 			switch: {
 				target: 'homepage', action() {},
 			},
@@ -83,6 +108,7 @@ const machine = createMachine({
 	},
 })
 
+var timeInState = 0;
 var state = machine.value;
 
 function cRect(e){ return {x: e.x / canvas.getBoundingClientRect().width, y: 1.0-(e.y / canvas.getBoundingClientRect().height)} }; // FLIPS Y
@@ -103,15 +129,14 @@ function homepage_onEnter(){
     });
 }
 function homepage_onUpdate(dt){}
-function homepage_onExit(){
-    app.off('pc-home-click');
-}
+function homepage_onExit(){ app.off('pc-home-click'); }
 
 function naming_onEnter(){
     setQRBackgroundVisibility(0);
     setDevMenuVisibility(0);
     setInputVisibility(1);
     resetInputFieldMessage();
+    fadePlaneAnim([0,0,0],2);
 
     for (let i = 0; i < 8; i++) {
         const skull = skulls[i];
@@ -125,34 +150,73 @@ function naming_onEnter(){
 
     app.on('pc-name-submit', (e) => {
         state = machine.transition(state, 'goToLobby');
-
-        if(!w.isHost){
+        w.dbSet(w.dbRef(w.db, `game_room/players/player_${(myState.playerID+1).toString()}/name`), inputFieldElem.value);
+        
+        if(w.isHost){
+            writeNewExchange('WAITING');
+        } else {
             writeNewExchange('JOINED');
         }
     });
 }
 function naming_onUpdate(dt){}
-function naming_onExit(){
-    app.off('pc-name-submit');
-}
+function naming_onExit(){ app.off('pc-name-submit'); }
 
 function lobby_onEnter(){
+    fadePlaneAnim([0,0,0],2);
     setInputVisibility(2);
+    namingEntity.setLocalPosition(0,1000,0);
     for (let i = 0; i < 8; i++) {
-        const skull = skulls[i];
-        let centerArray = centeredList(i,8,9.75,[0,-10,1]);
-        skull.setLocalPosition(centerArray[0],centerArray[1],centerArray[2]);
-        skull.setLocalScale(8,8,8);
+        skulls[i].setLocalScale(12,12,12);
     }
+    calcPlayersInGame().then(() => { layoutLobbyScreen(); });
+    app.on('check-lobby-size',() =>{
+        calcPlayersInGame().then(() => { layoutLobbyScreen(); });
+    });
+    app.on('pc-lobby-click', (e) => {
+        if(!w.isHost) return;
+        
+        if(cRect(e).y < 0.2 && timeInState > 0.5){ // Start game
+            writeNewExchange('STARTING');
+            state = machine.transition(state, 'goToRound');
+        }
+    });
+    app.on('move-into-round',() =>{
+        state = machine.transition(state, 'goToRound');
+    });
+    
 }
 function lobby_onUpdate(dt){}
-function lobby_onExit(){}
+function lobby_onExit(){ app.off('check-lobby-size'); app.off('pc-lobby-click'); app.off('move-into-round'); }
 
-function newRound_onEnter(){}
-function newRound_onUpdate(dt){}
-function newRound_onExit(){}
+var roundIntroTimer = 0.0, movedIntoAnswering = false;
+function newRound_onEnter(){
+    roundIntroTimer = 0.0;
+    movedIntoAnswering = false;
+    setInputVisibility(0);
+    for (let i = 0; i < 8; i++) {
+        skulls[i].setLocalPosition(-100,-100,-100);
+    }
+    app.on('move-into-answering',() =>{
+        state = machine.transition(state, 'goToAnswering');
+    });
+}
+function newRound_onUpdate(dt){
+    if(w.isHost){
+        roundIntroTimer += dt;
+        if(roundIntroTimer > 3.0 && !movedIntoAnswering){
+            writeNewExchange('ANSWERING');
+            state = machine.transition(state, 'goToAnswering');
+            movedIntoAnswering = true;
+        }
+    }
+    
+}
+function newRound_onExit(){ app.off('move-into-answering'); }
 
-function answering_onEnter(){}
+function answering_onEnter(){
+    fadePlaneAnim([0,1,0]);
+}
 function answering_onUpdate(dt){}
 function answering_onExit(){}
 
@@ -173,15 +237,52 @@ const root = document.querySelector(':root');
 var handleTouch;
 var myState = {
     playerID: 0,
-    gameStateID: 0
+    gameStateID: 0,
+    playersInGame: 0,
+    allPlayerNames: [
+        'Jay',
+        '^!*',
+        '^!*',
+        '^!*',
+        '^!*',
+        '^!*',
+        '^!*',
+        '^!*',
+    ]
 };
+function getExchangeKeyValue(fullString){
+    const spl = String(fullString).substring(1).split(':');
+    return {key: spl[0], value: spl[1]}
+};
+async function calcPlayersInGame(){
+    await new Promise((resolve) => {
+        var current = 1; // Always has host
+        w.dbGet(w.dbRef(w.db, 'game_room')).then((snap) => {
+            const dbObj = snap.val();
+            if(dbObj.block_all_traffic === true) return;
+            // Skip player 1, they are host
+            if(getExchangeKeyValue(dbObj.players.player_2.exchange).key == 'JOINED') {current += 1; myState.allPlayerNames[1] = dbObj.players.player_2.name}
+            if(getExchangeKeyValue(dbObj.players.player_3.exchange).key == 'JOINED') {current += 1; myState.allPlayerNames[2] = dbObj.players.player_3.name}
+            if(getExchangeKeyValue(dbObj.players.player_4.exchange).key == 'JOINED') {current += 1; myState.allPlayerNames[3] = dbObj.players.player_4.name}
+            if(getExchangeKeyValue(dbObj.players.player_5.exchange).key == 'JOINED') {current += 1; myState.allPlayerNames[4] = dbObj.players.player_5.name}
+            if(getExchangeKeyValue(dbObj.players.player_6.exchange).key == 'JOINED') {current += 1; myState.allPlayerNames[5] = dbObj.players.player_6.name}
+            if(getExchangeKeyValue(dbObj.players.player_7.exchange).key == 'JOINED') {current += 1; myState.allPlayerNames[6] = dbObj.players.player_7.name}
+            if(getExchangeKeyValue(dbObj.players.player_8.exchange).key == 'JOINED') {current += 1; myState.allPlayerNames[7] = dbObj.players.player_8.name}
+
+            myState.playersInGame = current;
+            resolve();
+        });
+    });
+}
 
 var uTime = 0;
 var ui_bottom, ui_top, ui_center;
 var backgroundPatternShaderDef, backgroundPatternShader, backgroundPatternPlane;
-var QRShaderDef, QRShader, QRPlane, CodePlane, titlePlane, qrSkull, namingSkull;
+var QRShaderDef, QRShader, QRPlane, CodePlane, titlePlane, qrSkull, namingEntity;
+var fadeRect, fadePlaneAnim_t = 0.0, fadePlaneColour=[0,0,0];
 var skullShaderDef, skullShader;
 const allText = [];
+const allLobbyTextEntities = [], allLobbyTextElements = [];
 const skulls = [];
 var inputFieldElem, inputFieldAnswerElem;
 
@@ -255,7 +356,9 @@ MainScene.prototype.initialize = function() {
     MainScene.prototype.createBackground();
     MainScene.prototype.createQR();
     MainScene.prototype.createNamingScreen();
+    MainScene.prototype.createLobbyScreen();
     MainScene.prototype.createSkulls();
+    MainScene.prototype.createFadePlane();
 
     const centerTextElem = new pc.Entity('CenterTextElem');
     centerTextElem.setLocalEulerAngles(90,0,0);
@@ -300,19 +403,37 @@ MainScene.prototype.initialize = function() {
     if(handleTouch){
         window.addEventListener("touchstart", (event) => {
             app.fire('pc-home-click',parseInputEvent(event));
+            app.fire('pc-lobby-click',parseInputEvent(event));
         });
     }else{
         window.addEventListener("mousedown", (event) => {
             app.fire('pc-home-click',parseInputEvent(event));
+            app.fire('pc-lobby-click',parseInputEvent(event));
         });
     }
     
     window.addEventListener('keydown',(e) => {
-        if(e.key == 'e'){ refreshSkullOffsets(); } // DELETE
+        if(e.key == 'e'){
+            const orderString = getMatchupOrder(7,promptsObj.length);
+
+            const baseArray = [];
+            
+
+            // const orderObj = JSON.parse(orderString);
+            // console.log(orderObj);
+            
+
+        } // DELETE
+        return;
         if(e.key == 'g'){ QRPlane.enabled = false; } // DELETE
-        if(e.key == 'r'){ resetGameRoom(true); } // DELETE
+        if(e.key == 'r'){ resetGameRoom(); } // DELETE
         if(e.key == 'x'){ writeNewExchange("WAITING","0,1,2,3,4"); } // DELETE
-        // if(e.key == 'f'){ writeNewExchange("WAITING","0,1,2,3,4"); } // DELETE
+        if(e.key == 'f'){
+            calcPlayersInGame().then(() => {
+                // console.log('playrs: ' + c.toString());
+                console.log(myState.playersInGame);
+            });
+        } // DELETE
     });
     if(w.isHost) resetGameRoom(); // DELETE?
 }
@@ -330,7 +451,6 @@ function firstUserFocus(){
             
             if(currentPlayerCount >= 8) return; // Too many players, do something to prevent them playing
             myState.playerID = currentPlayerCount; // Dont sub one?
-            console.log(currentPlayerCount);
             
 
             const updates = {};
@@ -361,28 +481,32 @@ function resetGameRoom(bypass=false){
     if(w.isHost === false && !bypass) return;
     w.dbSet(w.dbRef(w.db, 'player_count'), 1);
     w.dbSet(w.dbRef(w.db, 'game_room'), {
-        game_exchange: 'RESET',
+        game_exchange: '^RESET:x',
         started: false,
         block_all_traffic: false,
         icon_offset: 0,
         colour_offset: 0,
         players: {
-            player_1: { exchange: "NIL", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
-            player_2: { exchange: "NIL", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
-            player_3: { exchange: "NIL", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
-            player_4: { exchange: "NIL", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
-            player_5: { exchange: "NIL", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
-            player_6: { exchange: "NIL", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
-            player_7: { exchange: "NIL", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
-            player_8: { exchange: "NIL", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 }
+            player_1: { exchange: "^NIL:x", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
+            player_2: { exchange: "^NIL:x", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
+            player_3: { exchange: "^NIL:x", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
+            player_4: { exchange: "^NIL:x", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
+            player_5: { exchange: "^NIL:x", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
+            player_6: { exchange: "^NIL:x", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
+            player_7: { exchange: "^NIL:x", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 },
+            player_8: { exchange: "^NIL:x", name: "NIL", answer_1: "A1", answer_2: "A2", score: 0 }
         }
     });
 }
 function receivedGameStateExchange(dataString){
     console.log('FROM GAME: ' + dataString);
+    if(getExchangeKeyValue(dataString).key == 'WAITING') app.fire('check-lobby-size');
+    if(getExchangeKeyValue(dataString).key == 'STARTING') app.fire('move-into-round');
+    if(getExchangeKeyValue(dataString).key == 'ANSWERING') app.fire('move-into-answering');
 }
 function receivedPlayerExchange(dataString, playerIndex){
     console.log(`FROM PLAYER ${playerIndex+1}: ` + dataString);
+    if(getExchangeKeyValue(dataString).key == 'JOINED') {app.fire('check-lobby-size'); writeNewExchange('WAITING');}
 }
 
 MainScene.prototype.createBackground = function(){
@@ -467,7 +591,7 @@ MainScene.prototype.createQR = function(){
     // titlePlane.render.meshInstances[0].material.colorMap = assets.titleTex.resource;
     // titlePlane.render.meshInstances[0].material.color = new pc.Color(0,0,0,0.5);
 
-    app.root.addChild(titlePlane);
+    // app.root.addChild(titlePlane);
 
     qrSkull = new pc.Entity('QR-Skull');
     qrSkull.addComponent('render', { type: 'plane' });
@@ -484,7 +608,7 @@ MainScene.prototype.createQR = function(){
 };
 MainScene.prototype.createNamingScreen = function(){
 
-    const namingEntity = new pc.Entity('Naming-Entity');
+    namingEntity = new pc.Entity('Naming-Entity');
     namingEntity.setLocalEulerAngles(90,0,0);
     ui_center.addChild(namingEntity);
     namingEntity.setLocalPosition(0,33,0);
@@ -503,6 +627,44 @@ MainScene.prototype.createNamingScreen = function(){
     // namingSkull.render.meshInstances[0].material.blendType = pc.BLEND_NORMAL;
     // namingSkull.render.meshInstances[0].material.setParameter('uMainTex',assets.skullTex_3.resource);
 };
+MainScene.prototype.createLobbyScreen = function() {
+    for (let i = 0; i < 8; i++) {
+        const newLobbyTextEntity = new pc.Entity('Lobby-Text-Entity');
+        newLobbyTextEntity.setLocalEulerAngles(90,0,0);
+        ui_center.addChild(newLobbyTextEntity);
+        newLobbyTextEntity.setLocalPosition(0,-1033,0);
+        MainScene.prototype.newText("GRT: " + i.toString(),newLobbyTextEntity,[0,0.0,1],0.92,[1,1,1],0,[5.2,5.2,14],true);
+        allLobbyTextEntities.push(newLobbyTextEntity);
+    }
+};
+function layoutLobbyScreen(){
+    var numberOfPlayers = myState.playersInGame;
+    var spacing = [
+        0.75, // 1
+        24.75, // 2
+        20.75, // 3
+        15.75, // 4
+        15.75, // 5
+        12.75, // 6
+        11.75, // 7
+        10.75, // 8
+    ]
+    for (let i = 0; i < 8; i++) {
+    // for (let i = 7; i >= 0; i--) {
+        if(i >= numberOfPlayers){
+            allLobbyTextEntities[i].setLocalPosition(1000,1000,1000);
+            skulls[i].setLocalPosition(1000,1000,1000);
+            continue;
+        }
+        let centerTextArray = centeredList(numberOfPlayers-i, numberOfPlayers, spacing[numberOfPlayers-1], [25,0,1],false);
+        allLobbyTextEntities[i].setLocalPosition(centerTextArray[0],centerTextArray[1],centerTextArray[2]);
+        skulls[i].setPosition(allLobbyTextEntities[i].getPosition().x - (52 * pc_dpi), allLobbyTextEntities[i].getPosition().y, allLobbyTextEntities[i].getPosition().z);
+        const textColour = getPlayerColour(i);
+        allLobbyTextElements[i].element.color = new pc.Color(textColour[0],textColour[1],textColour[2],1.0);
+        allLobbyTextElements[i].element.text = myState.allPlayerNames[i];
+        
+    }
+}
 MainScene.prototype.createSkulls = function(){
     skullShaderDef = {
         attributes: {
@@ -530,14 +692,36 @@ MainScene.prototype.createSkulls = function(){
         newSkull.render.meshInstances[0].material.setParameter('uAlpha', 1); // 0.125
         ui_top.addChild(newSkull);
         newSkull.setLocalScale(8,8,8);
-        // newSkull.setLocalPosition(0,-10 * i,1);
-        let centerArray = centeredList(i,8,9.75,[0,-10,1]);
+        newSkull.setLocalPosition(0,-10 * i,1);
+        let centerArray = centeredList(i,8,9.75,[0,1010,1]);
         newSkull.setLocalPosition(centerArray[0],centerArray[1],centerArray[2]);
 
         skulls.push(newSkull);
     }
+};
+MainScene.prototype.createFadePlane = function(){
+
+    fadeRect = new pc.Entity("Fade-Rect");
+    fadeRect.addComponent("element", {
+        pivot: new pc.Vec2(0.5, 0.5),
+        anchor: new pc.Vec4(0.5, 0.5, 0.5, 0.5),
+        width: 350,
+        height: 350,
+        type: pc.ELEMENTTYPE_IMAGE,
+        color: new pc.Color(0.0, 0.0, 0.0, 0.0),
+        opacity: 0.0,
+        // texture: assets.testLogo.resource
+    });
+    fadeRect.setPosition(0,0,5);
+    fadeRect.setLocalScale(.1,.1,.1);
+    screen.addChild(fadeRect);
+};
+function fadePlaneAnim(colour=[0,0,0],start_t=1.0){
+    fadePlaneColour = colour;
+    fadeRect.element.color = new pc.Color(fadePlaneColour[0],fadePlaneColour[1],fadePlaneColour[2],1.0);
+    fadePlaneAnim_t = start_t;
 }
-MainScene.prototype.newText = function(defaultText, parent, offset, scale, color=[1.0,1.0,1.0], fontID=0, autoSizingData=[5.2,10.2,14]) {
+MainScene.prototype.newText = function(defaultText, parent, offset, scale, color=[1.0,1.0,1.0], fontID=0, autoSizingData=[5.2,10.2,14], leftAlign=false) {
     // defaultText = "d";
     const fontRef = [assets.PPMoriSemiBold.resource];
 
@@ -552,7 +736,7 @@ MainScene.prototype.newText = function(defaultText, parent, offset, scale, color
         maxFontSize: autoSizingData[1],
         text: defaultText,
         color: color,
-        alignment: [0.5,0.5],
+        alignment: leftAlign ? [0.0,0.5] : [0.5,0.5],
         autoWidth: false,
         autoFitWidth: true,
         width: 92,
@@ -570,13 +754,16 @@ MainScene.prototype.newText = function(defaultText, parent, offset, scale, color
         textScale: [scale,scale,scale],
     }
     allText.push(newTextObject);
+    if(leftAlign) allLobbyTextElements.push(textElem);
 
     return textElem;
-}
+};
 
 function resetUTime(){uTime = 0;}
 MainScene.prototype.update = function(dt) {
     uTime += dt;
+    timeInState += dt;
+    
     if(uTime > 600) resetUTime();
     if(backgroundPatternPlane != null) backgroundPatternPlane.render.meshInstances[0].material.setParameter('uTime', uTime);
     if(QRPlane != null) QRPlane.render.meshInstances[0].material.setParameter('uTime', uTime);
@@ -601,6 +788,16 @@ MainScene.prototype.update = function(dt) {
         const skull = skulls[i];
         let rot = Math.sin(uTime * spinOffsets[i]) * 20;
         skull.setLocalEulerAngles(90,0,rot);
+    }
+
+    if(fadePlaneAnim_t > 0){
+        fadePlaneAnim_t -= dt * 3;
+        fadeRect.element.opacity = clamp1(fadePlaneAnim_t,0,1);
+    }else{
+        fadePlaneAnim_t = 0;
+        if(fadeRect.element.opacity != 0){
+            fadeRect.element.opacity = 0;
+        }
     }
 }
 

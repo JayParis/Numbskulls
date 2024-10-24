@@ -75,6 +75,73 @@ function centeredList(index, total, spacing, pivot, isHorizontal=true){
     return outArray;
 }
 
+Array.prototype.pPop = function (index) {
+    // if(this.length == 1) return this[0];
+    return this.splice(index, 1)[0];
+}
+
+function getMatchupOrder(playerCount, promptListLength){
+    var ret = '';
+
+    const appendToMatchup = (player_a, player_b, question) => {
+        const beginning = ret == '' ? '' : ',';
+        ret += beginning + '[' + String(player_a) + ', ' + String(player_b) + ', ' + String(question) + ']'
+    }
+
+    var promptIndices = [];
+    for (let i = 0; i < promptListLength; i++) promptIndices.push(i);
+    const getQuestion = () => {
+        let randIndex = Math.floor((Math.random() * promptIndices.length) * 0.999999);
+        return promptIndices.pPop(randIndex);
+    };
+
+    var q1_players = [], q2_players = [];
+    for (let i = 0; i < playerCount; i++){
+        q1_players.push(i);
+        q2_players.push(i);
+    }
+    const getPlayer_Group1 = () => {
+        let randIndex = Math.floor((Math.random() * q1_players.length) * 0.999999);
+        return q1_players.pPop(randIndex);
+    };
+    const getPlayer_Group2 = () => {
+        let randIndex = Math.floor((Math.random() * q2_players.length) * 0.999999);
+        return q2_players.pPop(randIndex);
+    };
+    
+    var firstCount = Math.floor(q1_players.length / 2.0);
+    for (let i = 0; i < firstCount; i++) {
+        var q = getQuestion();
+
+        var p1 = getPlayer_Group1();
+        var p2 = getPlayer_Group1();
+
+        appendToMatchup(p1,p2,q);
+    }
+
+    // ret += ' ||| ';
+    if(q1_players.length > 0){
+        var q = getQuestion();
+
+        var p1 = q2_players.pPop(q1_players[0]);
+        var p2 = getPlayer_Group2();
+
+        appendToMatchup(p1,p2,q);
+    }
+
+    var secondCount = Math.floor(q2_players.length / 2.0);
+    for (let i = 0; i < secondCount; i++){
+        var q = getQuestion();
+
+        var p1 = getPlayer_Group2();
+        var p2 = getPlayer_Group2();
+
+        appendToMatchup(p1,p2,q);
+    }
+    // console.log(ret);
+    return ret;
+}
+
 // Curves
 
 function evaluateCurve(id, tVal){

@@ -89,7 +89,7 @@ void main()
     float fGrad = gradient;
 
     vec3 black = vec3(darkGradient,darkGradient,darkGradient);
-    vec3 coloured = mix(rainbow * smoothstep(-3.5,2.0,1.-qrBox) * 0.4, vec3(fGrad,fGrad,fGrad), f * (1.-qrBox) * 0.29935);
+    vec3 coloured = mix(rainbow * smoothstep(-3.5,2.0,1.-qrBox) * 0.4, vec3(fGrad,fGrad,fGrad), f * (1.-qrBox) * 0.9935);
     vec3 finalColour = mix(black, coloured, 1.0);
 
 	// vec4 ret = vec4(uv0, 0.0, 1.0);
