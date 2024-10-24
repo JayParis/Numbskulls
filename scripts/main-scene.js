@@ -344,7 +344,7 @@ function writeNewExchange(message, valuesAsString='x'){
 }
 
 var promptsObj;
-async function getPrompts(){ const response = await fetch('assets/objects/prompts.json'); promptsObj = await response.json(); };
+async function getPrompts(){ const response = await fetch('./assets/objects/prompts.json'); promptsObj = await response.json(); };
 function parsePromptText(unparsedText){
     return String(unparsedText).replaceAll('@','\n').replaceAll('^','"').replaceAll('*','\'')
 }
@@ -392,6 +392,7 @@ MainScene.prototype.initialize = function() {
         const promptMaxFontSize = promptsObj.prompts[indexToGet].maxFontSize;
         const promptLineHeight = promptsObj.prompts[indexToGet].lineHeight;
         // MainScene.prototype.newText(promptText,centerTextElem,[0,0.0,1],0.92,[1,1,1],0,[promptMinFontSize, promptMaxFontSize, promptLineHeight]);
+        console.log('Got Prompts');
         this.resizeMethod();
     });
 
