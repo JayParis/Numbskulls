@@ -344,7 +344,7 @@ function writeNewExchange(message, valuesAsString='x'){
 }
 
 var promptsObj;
-async function getPrompts(){ const response = await fetch('/assets/objects/prompts.json'); promptsObj = await response.json(); };
+async function getPrompts(){ const response = await fetch('./assets/objects/prompts.json'); promptsObj = await response.json(); };
 function parsePromptText(unparsedText){
     return String(unparsedText).replaceAll('@','\n').replaceAll('^','"').replaceAll('*','\'')
 }
